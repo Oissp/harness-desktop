@@ -8,3 +8,6 @@ out/
 
 # 提示词文件不上传（内部工作流）
 prompts/
+
+# pnpm 项目级 store（内容寻址缓存，不入库）
+.pnpm-store/
