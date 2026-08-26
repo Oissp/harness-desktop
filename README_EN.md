@@ -60,10 +60,10 @@ brew install harness-desktop
 
 | Platform | Installer |
 |---|---|
-| macOS Apple Silicon | [harness-desktop-0.1.0-arm64.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0-arm64.dmg) |
-| macOS Intel | [harness-desktop-0.1.0.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.dmg) |
-| Windows x64 | [harness-desktop.Setup.0.1.0.exe](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop.Setup.0.1.0.exe) |
-| Linux x64 | [harness-desktop-0.1.0.AppImage](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.AppImage) / [.deb](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop_0.1.0_amd64.deb) |
+| macOS Apple Silicon | [harness-desktop-0.1.3-arm64.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg) |
+| macOS Intel | [harness-desktop-0.1.3.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.dmg) |
+| Windows x64 | [harness-desktop.Setup.0.1.3.exe](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe) |
+| Linux x64 | [harness-desktop-0.1.3.AppImage](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage) / [.deb](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop_0.1.3_amd64.deb) |
 
 **China mirror (Gitee)**: https://gitee.com/jerryweizhihao/harness-desktop
 

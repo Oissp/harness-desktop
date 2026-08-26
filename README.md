@@ -87,11 +87,11 @@ brew install harness-desktop
 **直接下载安装包**：
 ```bash
 # macOS (Apple Silicon)
-curl -L -o harness-desktop.dmg "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0-arm64.dmg"
+curl -L -o harness-desktop.dmg "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg"
 # Windows
-curl -L -o harness-desktop.exe "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop.Setup.0.1.0.exe"
+curl -L -o harness-desktop.exe "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe"
 # Linux
-curl -L -o harness-desktop.AppImage "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.AppImage"
+curl -L -o harness-desktop.AppImage "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage"
 chmod +x harness-desktop.AppImage && ./harness-desktop.AppImage
 ```
 
