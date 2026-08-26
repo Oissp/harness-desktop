@@ -46,13 +46,13 @@ jobs:
       new_version: ${{ steps.diff.outputs.new_version }}
       old_version: ${{ steps.diff.outputs.old_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 11.21.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload bumped source
         if: steps.diff.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bumped-source
           path: |
@@ -161,10 +161,10 @@ jobs:
       # 运行时都依赖系统 glibc 版本；在 trixie 内构建 = 最低在 trixie 上可运行。
       image: debian:13
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped source
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: bumped-source
           path: .
@@ -245,7 +245,7 @@ jobs:
           dpkg-deb -c "$DEB" | head -30
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: harness-desktop-deb
           path: out/*.deb
@@ -257,16 +257,16 @@ jobs:
     if: needs.sync.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download bumped source
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: bumped-source
           path: .
 
       - name: Download .deb artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: harness-desktop-deb
           path: release-assets
