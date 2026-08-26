@@ -55,8 +55,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          # 不用 setup-node 内置 cache: pnpm：sync job 仅做版本检测 + lockfile 更新，
+          # 不做完整依赖安装；内置缓存在 Post cleanup 阶段会因找不到 lockfile
+          # 报 Path Validation Error（changed=false 时 install 步骤被跳过触发）。
+          # 真正的依赖安装在 build job（debian:13 容器内）中完成，不共享此缓存。
 
       - name: Read locked dsh version
         id: locked
