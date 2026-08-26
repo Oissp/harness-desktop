@@ -78,16 +78,28 @@ function setupUpdater() {
   })
 }
 
-/** 创建系统托盘：鲸鱼 template 图标 + 菜单（显示/新建会话/退出）。 */
+/** 创建系统托盘：鲸鱼图标 + 菜单（显示/新建会话/退出）。 */
 function createTray() {
-  const iconPath = join(app.getAppPath(), 'build', 'tray', 'TrayTemplate.png')
-  const image = nativeImage.createFromPath(iconPath)
+  const isMac = process.platform === 'darwin'
+  const trayDir = join(app.getAppPath(), 'build', 'tray')
+  const image = nativeImage.createFromPath(join(trayDir, 'TrayTemplate.png'))
   if (image.isEmpty()) {
     // 兜底：用应用图标（彩色，非 template）
     tray = new Tray(join(app.getAppPath(), 'build', 'icon.png'))
-  } else {
+  } else if (isMac) {
+    // macOS：template image 由系统自动适配菜单栏深浅色（深色栏→白，浅色栏→黑）
     image.setTemplateImage(true)
     tray = new Tray(image)
+  } else {
+    // Windows/Linux：任务栏不会自动反色，使用白色单色图标适配深色任务栏
+    const whiteImage = nativeImage.createFromPath(join(trayDir, 'TrayWhite.png'))
+    if (whiteImage.isEmpty()) {
+      // 白色图标缺失时回退到 template（黑色）
+      image.setTemplateImage(true)
+      tray = new Tray(image)
+    } else {
+      tray = new Tray(whiteImage)
+    }
   }
   tray.setToolTip('harness-desktop')
 
