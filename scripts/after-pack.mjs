@@ -38,9 +38,10 @@ function ensurePlatformNativeModules(projectRoot, targetPlatform, src) {
   console.log(`[afterPack] 补平台原生模块: ${scoped}/${pkgName} (target=${targetPlatform})`)
   try {
     // 用 npm pack 拉 tarball → 手动解包进 node_modules（不写 package.json）
+    // stdio: 'inherit' 让 npm/tar 的输出进 CI 日志，便于排查网络或 registry 问题
     execFileSync('npm', ['pack', `${scoped}/${pkgName}`, '--pack-destination', projectRoot], {
       cwd: projectRoot,
-      stdio: 'pipe',
+      stdio: 'inherit',
       timeout: 120_000,
     })
     // npm pack 输出 koromix-koffi-win32-x64-<ver>.tgz（去掉 @ 前缀），用 glob 找实际文件
@@ -51,7 +52,7 @@ function ensurePlatformNativeModules(projectRoot, targetPlatform, src) {
     const tmpDir = join(projectRoot, `.tmp-${pkgName}`)
     rmSync(tmpDir, { recursive: true, force: true })
     mkdirSync(tmpDir, { recursive: true })
-    execFileSync('tar', ['-xzf', tgz, '-C', tmpDir], { cwd: projectRoot, stdio: 'pipe' })
+    execFileSync('tar', ['-xzf', tgz, '-C', tmpDir], { cwd: projectRoot, stdio: 'inherit' })
     const unpacked = join(tmpDir, 'package')
     if (!existsSync(unpacked)) throw new Error('tarball 无 package/ 目录')
     mkdirSync(scopedDir, { recursive: true })
@@ -62,7 +63,10 @@ function ensurePlatformNativeModules(projectRoot, targetPlatform, src) {
     if (!existsSync(pkgDir)) throw new Error(`解包后仍不存在: ${scoped}/${pkgName}`)
     console.log(`[afterPack] ✅ ${scoped}/${pkgName} 已补全`)
   } catch (err) {
-    console.warn(`[afterPack] ⚠️ 补 ${scoped}/${pkgName} 失败: ${err.message ?? err}（Windows 上原生模块可能缺失）`)
+    // koffi 是 dsh-subprocess-local 的硬依赖（顶层 import，无平台门控），缺失会让
+    // 引擎启动时崩溃。这里仅告警不抛错以保持与历史行为一致；verify-deb.mjs 会再次
+    // 校验产物并告警。stdio: inherit 已让上面的失败原因进 CI 日志。
+    console.warn(`[afterPack] ⚠️ 补 ${scoped}/${pkgName} 失败: ${err.message ?? err}（产物将缺原生模块，verify-deb 会告警）`)
   }
 }
 
