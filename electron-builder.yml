@@ -35,48 +35,15 @@ asarUnpack:
   - node_modules/.pnpm/node-pty*/**/*
   - node_modules/.pnpm/koffi*/**/*
 
-mac:
-  category: public.app-category.developer-tools
-  icon: build/icon.icns
-  target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
-  # 代码签名 + 公证（017）：签名身份从环境变量/钥匙串读取，不硬编码。
-  # 设置了 CSC_LINK（p12）或钥匙串含 Developer ID 证书时自动签名；
-  # 未设置时 electron-builder 默认跳过签名（identity 缺省）。
-  notarize:
-    # 不写死 teamId：从环境变量 APPLE_TEAM_ID / APPLE_ID 读取（见 docs/SIGNING.md）
-    teamId: ${env.APPLE_TEAM_ID}
-
-win:
-  icon: build/icon.png
-  target:
-    - target: nsis
-      arch:
-        - x64
-
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  perMachine: false
-  shortcutName: harness-desktop
-
+# 仅构建 Debian 13 / amd64 .deb（见 .github/workflows/build-debian.yml）
 linux:
   icon: build/icon.png
   category: Development
   target:
-    - target: AppImage
-      arch:
-        - x64
     - target: deb
       arch:
         - x64
   maintainer: harness-desktop <zhuanz@users.noreply.github.com>
-
-dmg:
-  title: harness-desktop
 
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

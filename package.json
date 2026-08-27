@@ -21,9 +21,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "pnpm build && electron-builder --mac --win",
-    "dist:mac": "pnpm build && electron-builder --mac",
-    "dist:win": "pnpm build && electron-builder --win"
+    "dist": "pnpm build && electron-builder --linux deb --x64"
   },
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",

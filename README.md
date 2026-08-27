@@ -105,12 +105,10 @@ pnpm dev          # 开发模式：vite + electron（HMR）
 pnpm build        # 构建 renderer + main
 pnpm test         # 运行单元测试（Vitest）
 pnpm typecheck    # TS 类型检查
-pnpm dist         # 打包 macOS dmg + Windows exe（输出到 out/）
-pnpm dist:mac     # 仅 macOS
-pnpm dist:win     # 仅 Windows
+pnpm dist         # 打包 Debian 13 .deb（amd64，输出到 out/）
 ```
 
-提示词工作流说明见 [prompts/README.md](prompts/README.md)；macOS 签名与公证流程见 [docs/SIGNING.md](docs/SIGNING.md)。
+提示词工作流说明见 [prompts/README.md](prompts/README.md)。
 
 ## 技术栈
 
@@ -127,9 +125,8 @@ pnpm dist:win     # 仅 Windows
 
 ## 已知限制（诚实标注）
 
-- **未签名**：当前 macOS/Windows 产物未做代码签名/公证，安装时系统可能提示"无法验证开发者"；签名流程见 [docs/SIGNING.md](docs/SIGNING.md)，配证书后即可产出可公开分发版本
 - **体积**：安装包约 130-230MB（内置完整 dsh 引擎 + Electron 框架）
-- **三平台**：macOS / Windows / Linux 均已在各自原生环境构建（GitHub Actions 矩阵），Windows 已实机验证可用
+- **平台**：仅构建 Debian 13 (trixie) / amd64 .deb（见 `.github/workflows/build-debian.yml`，自动跟随 dsh 上游 npm latest）
 - **dsh 引擎**：处于 rc 预览期，本项目跟踪官方 latest `0.1.1-rc.2`
 
 ## License

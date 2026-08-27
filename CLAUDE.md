@@ -15,9 +15,7 @@ pnpm build            # build renderer (vite) + electron main (tsc)
 pnpm typecheck        # tsc --noEmit against BOTH tsconfig.json and tsconfig.electron.json
 pnpm test             # vitest run
 pnpm test:watch       # vitest watch
-pnpm dist             # build + electron-builder (mac dmg + win exe → out/)
-pnpm dist:mac         # mac only
-pnpm dist:win         # windows only
+pnpm dist             # build + electron-builder Debian 13 .deb (amd64 → out/)
 ```
 
 Run a single test file: `pnpm test src/__tests__/chatReducer.test.ts` (vitest takes a path filter). Run a single test by name: `pnpm test -t "name fragment"`.
@@ -64,7 +62,7 @@ App-level settings (`AppSettings` in `shared/types.ts`) live in `<userData>` via
 - **`asar: false`** in `electron-builder.yml` — dsh profile init creates symlinks that don't resolve inside asar. Native modules (`node-pty`, `koffi`) are `asarUnpack`ed instead so they load under `ELECTRON_RUN_AS_NODE`.
 - **`scripts/after-pack.mjs`** copies the entire flat `node_modules` into the build (electron-builder's dependency collection misses transitive `@deepseek-ai/*` deps under pnpm) and fetches target-platform native binaries (`koffi-<platform>-<arch>`) for cross-platform builds.
 - **`pnpm-workspace.yaml`** uses `nodeLinker: hoisted` (no symlinks, flat layout) specifically so the packaged dependency closure resolves.
-- macOS auto-update requires code signing; unsigned builds silently skip updates. Signing flow is in `docs/SIGNING.md`.
+- This fork builds only the Debian 13 (trixie) / amd64 `.deb`. The `.github/workflows/build-debian.yml` workflow auto-tracks `@deepseek-ai/dsh` npm latest, bumps the version, runs regression tests, builds the `.deb` in a `debian:13` container, and publishes a GitHub Release (tag `dsh-v<version>`). `electron-builder.yml` is Debian-only (single `deb`/`x64` target).
 
 ## Conventions
 
@@ -77,4 +75,4 @@ App-level settings (`AppSettings` in `shared/types.ts`) live in `<userData>` via
 
 - `docs/REPORT.md` + `docs/history/REPORT-*.md` — delivery reports per version (the numbered comments like `021`, `026`, `031` in the code refer to these).
 - `docs/MIGRATION-DESIGN.md` — the design rationale for pointing the window at the official web UI.
-- `docs/SIGNING.md` — macOS signing/notarization; `docs/SIZE.md` — bundle size.
+- `docs/SIZE.md` — bundle size.

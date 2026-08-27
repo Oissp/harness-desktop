@@ -1,4 +1,4 @@
-name: Sync Upstream & Release (Debian 13)
+name: Build & Release (Debian 13)
 
 # 同步 dsh 上游 + 自动发版（仅 Debian 13 / amd64）
 #

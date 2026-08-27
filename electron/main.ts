@@ -31,7 +31,7 @@ autoUpdater.autoInstallOnAppQuit = true
 function setupUpdater() {
   // 打包环境才启用自动更新（dev 模式跳过）；未签名 macOS 构建 updater 不活跃，静默跳过
   if (app.isPackaged && !autoUpdater.isUpdaterActive()) {
-    console.warn('[harness-desktop] 自动更新不可用（未签名 macOS 构建，见 docs/SIGNING.md）')
+    console.warn('[harness-desktop] 自动更新不可用（未签名构建，updater 不活跃，静默跳过）')
     return
   }
   if (!app.isPackaged) return

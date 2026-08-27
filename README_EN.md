@@ -87,12 +87,8 @@ pnpm dev          # dev mode: vite + electron (HMR)
 pnpm build        # build renderer + main
 pnpm test         # run unit tests (Vitest)
 pnpm typecheck    # TS type check
-pnpm dist         # package macOS dmg + Windows exe (output to out/)
-pnpm dist:mac     # macOS only
-pnpm dist:win     # Windows only
+pnpm dist         # package Debian 13 .deb (amd64, output to out/)
 ```
-
-macOS signing & notarization: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Tech Stack
 
@@ -109,9 +105,8 @@ macOS signing & notarization: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Known Limitations
 
-- **Unsigned**: current builds are not code-signed/notarized — installers may show "unidentified developer" warnings; see [docs/SIGNING.md](docs/SIGNING.md)
 - **Size**: installers ~130-230MB (bundled dsh engine + Electron)
-- **3 platforms**: macOS / Windows / Linux built natively via GitHub Actions matrix; Windows verified on real hardware
+- **Platform**: only Debian 13 (trixie) / amd64 .deb is built (see `.github/workflows/build-debian.yml`, auto-tracks dsh upstream npm latest)
 - **dsh engine**: preview (rc), tracks official latest `0.1.1-rc.2`
 
 ## License
