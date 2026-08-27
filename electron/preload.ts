@@ -202,21 +202,6 @@ function injectDesktopBrand() {
     return { primary: '#e8eaf1', secondary: '#9aa3b2' }
   }
 
-  /** 左上角品牌内容：动态鲸鱼 + "harness desktop"（无版本徽标）。 */
-  const makeTopLeftBrand = (): HTMLElement => {
-    const { primary } = resolveBrandColors()
-    const el = document.createElement('span')
-    el.setAttribute('data-hd-topleft-brand', '1')
-    el.style.cssText =
-      'display:inline-flex;align-items:center;gap:10px;white-space:nowrap;user-select:none;'
-    el.innerHTML =
-      brandWhaleSvg(34, 'hd-topleft-grad') +
-      '<span data-hd-topleft-text style="font:700 17px/1 -apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;color:' +
-      primary +
-      ';letter-spacing:.2px">harness desktop</span>'
-    return el
-  }
-
   /** hero 版本徽标：浅色界面蓝底白字；深色界面白底深字（反差）。 */
   const heroVersionBadge = (): { style: string; dataAttr: string } => {
     const { primary } = resolveBrandColors()
@@ -251,36 +236,11 @@ function injectDesktopBrand() {
   }
 
   const applyVersion = () => {
-    // 左上角不显示版本；hero 版本徽标用 getVersion 填充（默认 v0.1.3）
-    const topLeftText = document.querySelector('[data-hd-topleft-text]')
-    if (topLeftText) topLeftText.textContent = 'harness desktop'
+    // hero 版本徽标用 getVersion 填充（默认 v0.1.3）
     void desktop.getVersion().then((v) => {
       const heroVer = document.querySelector('[data-hd-hero-ver]')
       if (heroVer) heroVer.textContent = 'v' + (v || '0.1.3')
     })
-  }
-
-  /**
-   * 替换官方左上角品牌（sidebar 顶部 logo + wordmark，官方为单张 svg）。
-   * 官方结构：`.hHd-Xa_logoRow > .hHd-Xa_brand`（aria-label="新建会话"，内含 svg）。
-   */
-  const ensureTopLeft = () => {
-    if (!document.body) return
-    if (document.querySelector('[data-hd-topleft-brand]')) return
-    // 官方 brand 按钮：含 svg 且 aria-label 含"新建会话"/"New"（右上/左上都可能出现，取 sidebar 内）
-    const candidates = Array.from(
-      document.querySelectorAll('[class*="_brand"], [aria-label*="新建会话"], [aria-label*="New Chat"]'),
-    )
-    for (const el of candidates) {
-      const hasSvg = el.querySelector('svg') !== null
-      const inSidebar = el.closest('[class*="sidebarCol"], [class*="sidebar"]') !== null
-      if (hasSvg && (inSidebar || el.getAttribute('aria-label'))) {
-        el.innerHTML = ''
-        el.appendChild(makeTopLeftBrand())
-        applyVersion()
-        return
-      }
-    }
   }
 
   /** hero 品牌替换的目标文本（多语言兜底：中文/英文/未就绪的 key）。 */
@@ -340,16 +300,14 @@ function injectDesktopBrand() {
   }
 
   const boot = () => {
-    ensureTopLeft()
     ensureHero()
-    // React 重渲染可能恢复官方 hero/brand → MutationObserver 持续兜底重注入（节流）
+    // React 重渲染可能恢复官方 hero → MutationObserver 持续兜底重注入（节流）
     // characterData: true —— locale 就绪后 hero 文本从 key/英文变中文是 characterData 变更
     let lastScan = 0
     const mo = new MutationObserver(() => {
       const now = Date.now()
       if (now - lastScan < 300) return
       lastScan = now
-      ensureTopLeft()
       ensureHero()
     })
     mo.observe(document.documentElement, {
@@ -357,10 +315,9 @@ function injectDesktopBrand() {
       subtree: true,
       characterData: true,
     })
-    // 兜底轮询：hero/brand 延迟渲染时也能命中（30s 后停止）
+    // 兜底轮询：hero 延迟渲染时也能命中（30s 后停止）
     const poll = () => {
       if (Date.now() - started > 30000) return
-      ensureTopLeft()
       ensureHero()
       setTimeout(poll, 400)
     }
