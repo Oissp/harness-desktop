@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)",
+      "Bash(echo \"=== EXIT: $? ===\")",
+      "Bash(git config *)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm test *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

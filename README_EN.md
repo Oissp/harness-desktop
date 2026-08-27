@@ -60,10 +60,10 @@ brew install harness-desktop
 
 | Platform | Installer |
 |---|---|
-| macOS Apple Silicon | [harness-desktop-0.1.0-arm64.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0-arm64.dmg) |
-| macOS Intel | [harness-desktop-0.1.0.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.dmg) |
-| Windows x64 | [harness-desktop.Setup.0.1.0.exe](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop.Setup.0.1.0.exe) |
-| Linux x64 | [harness-desktop-0.1.0.AppImage](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.AppImage) / [.deb](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop_0.1.0_amd64.deb) |
+| macOS Apple Silicon | [harness-desktop-0.1.3-arm64.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg) |
+| macOS Intel | [harness-desktop-0.1.3.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.dmg) |
+| Windows x64 | [harness-desktop.Setup.0.1.3.exe](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe) |
+| Linux x64 | [harness-desktop-0.1.3.AppImage](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage) / [.deb](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop_0.1.3_amd64.deb) |
 
 **China mirror (Gitee)**: https://gitee.com/jerryweizhihao/harness-desktop
 
@@ -96,7 +96,7 @@ macOS signing & notarization: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Tech Stack
 
-- **Engine**: DeepSeek Harness `@deepseek-ai/dsh@0.1.0-rc.7` (tracks official latest)
+- **Engine**: DeepSeek Harness `@deepseek-ai/dsh@0.1.1-rc.2` (tracks official latest)
 - **Shell**: Electron 43 + electron-builder
 - **Frontend**: React 18 + TypeScript + Vite (hand-written CSS + `--dsw-*` tokens, no heavy UI libs)
 - **Isolation layer**: `adapter/` encapsulates the dsh API — upstream changes only touch the adapter, the renderer never sees raw dsh fields
@@ -112,7 +112,7 @@ macOS signing & notarization: [docs/SIGNING.md](docs/SIGNING.md)
 - **Unsigned**: current builds are not code-signed/notarized — installers may show "unidentified developer" warnings; see [docs/SIGNING.md](docs/SIGNING.md)
 - **Size**: installers ~130-230MB (bundled dsh engine + Electron)
 - **3 platforms**: macOS / Windows / Linux built natively via GitHub Actions matrix; Windows verified on real hardware
-- **dsh engine**: preview (rc), tracks official latest `0.1.0-rc.7`
+- **dsh engine**: preview (rc), tracks official latest `0.1.1-rc.2`
 
 ## License
 

@@ -87,11 +87,11 @@ brew install harness-desktop
 **直接下载安装包**：
 ```bash
 # macOS (Apple Silicon)
-curl -L -o harness-desktop.dmg "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0-arm64.dmg"
+curl -L -o harness-desktop.dmg "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg"
 # Windows
-curl -L -o harness-desktop.exe "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop.Setup.0.1.0.exe"
+curl -L -o harness-desktop.exe "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe"
 # Linux
-curl -L -o harness-desktop.AppImage "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.1/harness-desktop-0.1.0.AppImage"
+curl -L -o harness-desktop.AppImage "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage"
 chmod +x harness-desktop.AppImage && ./harness-desktop.AppImage
 ```
 
@@ -114,7 +114,7 @@ pnpm dist:win     # 仅 Windows
 
 ## 技术栈
 
-- **引擎**：DeepSeek Harness `@deepseek-ai/dsh@0.1.0-rc.7`（跟踪官方 latest，同步官方功能）
+- **引擎**：DeepSeek Harness `@deepseek-ai/dsh@0.1.1-rc.2`（跟踪官方 latest，同步官方功能）
 - **桌面壳**：Electron 43 + electron-builder
 - **前端**：React 18 + TypeScript + Vite（手写 CSS + `--dsw-*` token，无重型 UI 库）
 - **隔离层**：`adapter/` 独立封装 dsh API，上游变更只改 adapter，renderer 永不见 dsh 原始字段
@@ -130,7 +130,7 @@ pnpm dist:win     # 仅 Windows
 - **未签名**：当前 macOS/Windows 产物未做代码签名/公证，安装时系统可能提示"无法验证开发者"；签名流程见 [docs/SIGNING.md](docs/SIGNING.md)，配证书后即可产出可公开分发版本
 - **体积**：安装包约 130-230MB（内置完整 dsh 引擎 + Electron 框架）
 - **三平台**：macOS / Windows / Linux 均已在各自原生环境构建（GitHub Actions 矩阵），Windows 已实机验证可用
-- **dsh 引擎**：处于 rc 预览期，本项目跟踪官方 latest `0.1.0-rc.7`
+- **dsh 引擎**：处于 rc 预览期，本项目跟踪官方 latest `0.1.1-rc.2`
 
 ## License
 

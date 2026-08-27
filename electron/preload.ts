@@ -243,7 +243,7 @@ function injectDesktopBrand() {
       ver.dataAttr +
       ' style="' +
       ver.style +
-      '">v0.1.0</span></span>' +
+      '>v0.1.3</span></span>' +
       '<span data-hd-hero-sub style="font:400 14px/1.5 -apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;color:' +
       secondary +
       '">你的 AI 工作台 · 开始对话</span>'
@@ -251,12 +251,12 @@ function injectDesktopBrand() {
   }
 
   const applyVersion = () => {
-    // 左上角不显示版本；hero 版本徽标用 getVersion 填充（默认 v0.1.0）
+    // 左上角不显示版本；hero 版本徽标用 getVersion 填充（默认 v0.1.3）
     const topLeftText = document.querySelector('[data-hd-topleft-text]')
     if (topLeftText) topLeftText.textContent = 'harness desktop'
     void desktop.getVersion().then((v) => {
       const heroVer = document.querySelector('[data-hd-hero-ver]')
-      if (heroVer) heroVer.textContent = 'v' + (v || '0.1.0')
+      if (heroVer) heroVer.textContent = 'v' + (v || '0.1.3')
     })
   }
 
