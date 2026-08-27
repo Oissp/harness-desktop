@@ -179,7 +179,10 @@ export class DshManager {
       DSH_HOME: this.dshHome,
       ...(isElectron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     }
-    const args = ['--expose-internals', bin, 'web', '--host', '127.0.0.1', '--port', '0']
+    // --no-open：dsh web 默认会把 UI URL 交给系统默认浏览器打开（openBrowser 默认 true）。
+    // 桌面端已由 Electron 的 BrowserWindow 加载引擎 UI，不需要 dsh 再开浏览器，否则会
+    // 多出一个浏览器窗口（见 dsh-web-app/lib/index.js handoffBrowser）。
+    const args = ['--expose-internals', bin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open']
 
     const child = spawn(exec, args, {
       env,
