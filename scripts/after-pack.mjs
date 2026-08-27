@@ -80,12 +80,33 @@ function loadDevDeps(projectRoot) {
   }
 }
 
-/** 是否应排除某顶层包：dev 依赖或构建工具。 */
-function shouldExclude(name, devDeps) {
+/** electron-builder Arch 枚举 → 字符串（context.arch 是数字）。 */
+function archName(arch) {
+  // electron-builder Arch：1=ia32 2=x64 3=armv7l 4=arm64 5=universal
+  const map = { 1: 'ia32', 2: 'x64', 3: 'armv7l', 4: 'arm64', 5: 'universal' }
+  return map[arch] ?? 'x64'
+}
+
+/**
+ * 判断包名是否为「非目标平台/架构」的原生 prebuild（PR #304 实践）。
+ * sharp / koffi / esbuild / ripgrep 等用 optionalDependencies 分发各平台二进制，
+ * 它们会同时落进扁平 node_modules；x64-only 产物里 arm64/win32/darwin 的 prebuild
+ * 全是死重量（数十 MB）。按包名末尾的 -<platform>-<arch> 标记排除非目标者。
+ */
+function isNonTargetPrebuild(pkgName, targetPlatform, targetArch) {
+  const m = pkgName.match(/-(linux|win32|darwin|freebsd|sunos)-(x64|arm64|arm32|ia32|armv7l)$/)
+  if (!m) return false
+  const [, plat, arch] = m
+  return plat !== targetPlatform || arch !== targetArch
+}
+
+/** 是否应排除某顶层包：dev 依赖、构建工具，或非目标平台的 prebuild。 */
+function shouldExclude(name, devDeps, targetPlatform, targetArch) {
   if (devDeps.has(name)) return true
   // 构建/打包工具链（即使非 devDep 也排除，运行时不加载）
   const buildTools = new Set(['app-builder-bin', '7zip-bin', 'esbuild', 'electron-builder-binaries'])
-  return buildTools.has(name)
+  if (buildTools.has(name)) return true
+  return isNonTargetPrebuild(name, targetPlatform, targetArch)
 }
 
 export default async function afterPack(context) {
@@ -99,6 +120,10 @@ export default async function afterPack(context) {
   }
 
   const devDeps = loadDevDeps(projectRoot)
+  // 目标平台/架构：用于排除非目标平台的 prebuild（context.arch 为数字枚举）
+  const targetPlatform = context.electronPlatformName ?? packager.platform.nodeName
+  const targetArch = archName(context.arch)
+  console.log(`[afterPack] 目标平台: ${targetPlatform}/${targetArch}`)
 
   // 031：交叉打包时补目标平台原生模块（koffi 等）——必须在 cpSync 之前
   ensurePlatformNativeModules(projectRoot, packager.platform.nodeName, src)
@@ -131,7 +156,7 @@ export default async function afterPack(context) {
       if (pkgName !== null) {
         // 只判断包根路径（后面是包内文件）
         const isRoot = !seg[0].startsWith('@') ? seg.length === 1 : seg.length === 2
-        if (isRoot) return !shouldExclude(pkgName, devDeps)
+        if (isRoot) return !shouldExclude(pkgName, devDeps, targetPlatform, targetArch)
       }
       return true
     },

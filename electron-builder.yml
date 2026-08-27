@@ -27,6 +27,15 @@ asar: false
 
 npmRebuild: false
 
+# Linux 产物钉死 Electron 42.9.3（PR #304 实践）：
+# Electron 43.x 在 GNOME（Ubuntu 24.04 / Debian 13）下托盘图标坏掉——
+#   43.4.0 的 SNI IconPixmap Get 报错，图标 ~3s 后消失；
+#   43.4.1 的 name/path 注册串被拒。
+# 42.9.3 内嵌的 Node（24.18.1）与 43.4.0 相同，原生 NAPI 模块兼容，
+# 仅 Linux 产物降级；dev / 测试仍用 devDependencies 里的 43.4.0。
+# 上游修复后删掉此行即可恢复跟随。
+electronVersion: 42.9.3
+
 # 复制完整 node_modules（见 scripts/after-pack.mjs）
 afterPack: scripts/after-pack.mjs
 

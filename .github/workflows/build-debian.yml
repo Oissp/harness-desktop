@@ -247,6 +247,13 @@ jobs:
           echo "--- 内容(前30行) ---"
           dpkg-deb -c "$DEB" | head -30
 
+      - name: Verify .deb integrity (PR #304 实践)
+        run: |
+          # magic bytes + 关键运行时路径 + 平台纯净性校验
+          # 兜住 after-pack.mjs 整体复制 node_modules 可能出的错：
+          #   依赖闭包缺失、koffi 平台不符、非目标平台 prebuild 泄入等
+          node scripts/verify-deb.mjs
+
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v7
         with:
