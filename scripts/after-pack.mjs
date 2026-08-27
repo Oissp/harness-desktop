@@ -24,6 +24,15 @@ function koffiPlatformPackage(targetPlatform) {
   return map[targetPlatform] ?? null
 }
 
+/** koffi 原生二进制的预期路径（koffi 主包 loadDynamic 按 platform_abi/koffi.node 查找）。 */
+function koffiNativeBinary(pkgDir, targetPlatform) {
+  // koffi 平台包内布局：linux_x64/koffi.node、musl_x64/koffi.node、win32_x64/koffi.node …
+  // 包名已含 arch（koffiPlatformPackage 固定 x64），故 abi 与包名一致。
+  // 仅检查目录存在不够（可能空壳/断链），必须确认 .node 二进制真实在位。
+  const abi = targetPlatform === 'darwin' && process.arch === 'arm64' ? 'arm64' : 'x64'
+  return join(pkgDir, `${targetPlatform}_${abi}`, 'koffi.node')
+}
+
 /** 确保某平台原生模块包存在于 src（不存在则从 npm 拉取到 node_modules）。 */
 function ensurePlatformNativeModules(projectRoot, targetPlatform, src) {
   const scoped = '@koromix'
@@ -31,43 +40,44 @@ function ensurePlatformNativeModules(projectRoot, targetPlatform, src) {
   if (!pkgName) return
   const scopedDir = join(src, scoped)
   const pkgDir = join(scopedDir, pkgName)
-  if (existsSync(pkgDir)) {
-    console.log(`[afterPack] 平台原生模块已存在: ${scoped}/${pkgName}`)
+  // 只检查目录存在不够：pnpm 在某些布局下可能留下空壳或符号链接断链。
+  // 必须确认 .node 二进制真实在位，否则 koffi 加载时仍会崩。
+  const nativeBin = koffiNativeBinary(pkgDir, targetPlatform)
+  if (existsSync(nativeBin)) {
+    console.log(`[afterPack] 平台原生模块已存在: ${scoped}/${pkgName}（${nativeBin.slice(src.length)}）`)
     return
   }
   console.log(`[afterPack] 补平台原生模块: ${scoped}/${pkgName} (target=${targetPlatform})`)
-  try {
-    // 用 npm pack 拉 tarball → 手动解包进 node_modules（不写 package.json）
-    // stdio: 'inherit' 让 npm/tar 的输出进 CI 日志，便于排查网络或 registry 问题
-    execFileSync('npm', ['pack', `${scoped}/${pkgName}`, '--pack-destination', projectRoot], {
-      cwd: projectRoot,
-      stdio: 'inherit',
-      timeout: 120_000,
-    })
-    // npm pack 输出 koromix-koffi-win32-x64-<ver>.tgz（去掉 @ 前缀），用 glob 找实际文件
-    const tgzFile = readdirSync(projectRoot).find((f) => f.includes(pkgName) && f.endsWith('.tgz'))
-    if (!tgzFile) throw new Error('npm pack 未生成 tarball')
-    const tgz = join(projectRoot, tgzFile)
-    // tarball 结构是 package/...，先解到临时目录再把 package 移到目标位置
-    const tmpDir = join(projectRoot, `.tmp-${pkgName}`)
-    rmSync(tmpDir, { recursive: true, force: true })
-    mkdirSync(tmpDir, { recursive: true })
-    execFileSync('tar', ['-xzf', tgz, '-C', tmpDir], { cwd: projectRoot, stdio: 'inherit' })
-    const unpacked = join(tmpDir, 'package')
-    if (!existsSync(unpacked)) throw new Error('tarball 无 package/ 目录')
-    mkdirSync(scopedDir, { recursive: true })
-    rmSync(pkgDir, { recursive: true, force: true })
-    cpSync(unpacked, pkgDir, { recursive: true })
-    rmSync(tmpDir, { recursive: true, force: true })
-    rmSync(tgz, { force: true })
-    if (!existsSync(pkgDir)) throw new Error(`解包后仍不存在: ${scoped}/${pkgName}`)
-    console.log(`[afterPack] ✅ ${scoped}/${pkgName} 已补全`)
-  } catch (err) {
-    // koffi 是 dsh-subprocess-local 的硬依赖（顶层 import，无平台门控），缺失会让
-    // 引擎启动时崩溃。这里仅告警不抛错以保持与历史行为一致；verify-deb.mjs 会再次
-    // 校验产物并告警。stdio: inherit 已让上面的失败原因进 CI 日志。
-    console.warn(`[afterPack] ⚠️ 补 ${scoped}/${pkgName} 失败: ${err.message ?? err}（产物将缺原生模块，verify-deb 会告警）`)
+  // koffi 是 dsh-subprocess-local 的硬依赖（顶层 import，无平台门控），缺失会让
+  // 引擎启动时崩溃——没有静默降级的余地。这里失败必须抛错，让 CI 在打包步骤就
+  // 明确失败并打印原因，而不是事后由 verify-deb 告警。
+  // 用 npm pack 拉 tarball → 手动解包进 node_modules（不写 package.json）
+  // stdio: 'inherit' 让 npm/tar 的输出进 CI 日志，便于排查网络或 registry 问题
+  execFileSync('npm', ['pack', `${scoped}/${pkgName}`, '--pack-destination', projectRoot], {
+    cwd: projectRoot,
+    stdio: 'inherit',
+    timeout: 120_000,
+  })
+  // npm pack 输出 koromix-koffi-win32-x64-<ver>.tgz（去掉 @ 前缀），用 glob 找实际文件
+  const tgzFile = readdirSync(projectRoot).find((f) => f.includes(pkgName) && f.endsWith('.tgz'))
+  if (!tgzFile) throw new Error('npm pack 未生成 tarball')
+  const tgz = join(projectRoot, tgzFile)
+  // tarball 结构是 package/...，先解到临时目录再把 package 移到目标位置
+  const tmpDir = join(projectRoot, `.tmp-${pkgName}`)
+  rmSync(tmpDir, { recursive: true, force: true })
+  mkdirSync(tmpDir, { recursive: true })
+  execFileSync('tar', ['-xzf', tgz, '-C', tmpDir], { cwd: projectRoot, stdio: 'inherit' })
+  const unpacked = join(tmpDir, 'package')
+  if (!existsSync(unpacked)) throw new Error('tarball 无 package/ 目录')
+  mkdirSync(scopedDir, { recursive: true })
+  rmSync(pkgDir, { recursive: true, force: true })
+  cpSync(unpacked, pkgDir, { recursive: true })
+  rmSync(tmpDir, { recursive: true, force: true })
+  rmSync(tgz, { force: true })
+  if (!existsSync(nativeBin)) {
+    throw new Error(`补全后 ${scoped}/${pkgName} 仍缺 .node 二进制（${nativeBin}）——检查 npm pack 拉到的 tarball 是否匹配平台`)
   }
+  console.log(`[afterPack] ✅ ${scoped}/${pkgName} 已补全`)
 }
 
 /**
@@ -170,5 +180,26 @@ export default async function afterPack(context) {
     console.log(`[afterPack] 复制完成，@deepseek-ai 包数 = ${count}`)
   } catch {
     console.log('[afterPack] 复制完成（无 @deepseek-ai 目录）')
+  }
+
+  // 最终断言：koffi 原生二进制必须进了产物。koffi 是 dsh-subprocess-local 的硬依赖
+  // （顶层 import 无平台门控），缺失即引擎启动崩溃。这里区分两种根因便于排查：
+  //   - 源里就没有 → ensurePlatformNativeModules 未补上（见上面的日志）
+  //   - 源里有但没复制 → filter 误排除（不应发生，isNonTargetPrebuild 保留 linux-x64）
+  const koffiPkg = koffiPlatformPackage(packager.platform.nodeName)
+  if (koffiPkg) {
+    const destBin = koffiNativeBinary(join(dest, '@koromix', koffiPkg), packager.platform.nodeName)
+    if (!existsSync(destBin)) {
+      const srcBin = koffiNativeBinary(join(src, '@koromix', koffiPkg), packager.platform.nodeName)
+      const inSrc = existsSync(srcBin)
+      throw new Error(
+        `[afterPack] 产物缺 koffi 原生二进制: ${destBin}\n` +
+        `  源 node_modules ${inSrc ? '有' : '无'} 该二进制（${srcBin}）。\n` +
+        (inSrc
+          ? '  源有但没复制 → 检查 cpSync filter 的 shouldExclude 是否误排了 @koromix/' + koffiPkg
+          : '  源也没有 → ensurePlatformNativeModules 的 npm pack 兜底失败，见上方日志')
+      )
+    }
+    console.log(`[afterPack] ✅ koffi 原生二进制已在产物: ${destBin.slice(dest.indexOf('node_modules'))}`)
   }
 }
