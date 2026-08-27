@@ -55,10 +55,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          # 不用 setup-node 内置 cache: pnpm：sync job 仅做版本检测 + lockfile 更新，
-          # 不做完整依赖安装；内置缓存在 Post cleanup 阶段会因找不到 lockfile
-          # 报 Path Validation Error（changed=false 时 install 步骤被跳过触发）。
-          # 真正的依赖安装在 build job（debian:13 容器内）中完成，不共享此缓存。
+          # setup-node@v5 读到 package.json 的 packageManager 字段会自动启用 pnpm
+          # 缓存；sync job 不做依赖安装（pnpm install 被 changed 条件跳过），store
+          # 目录不存在，Post cleanup 保存缓存时报 Path Validation Error。
+          # 显式关闭自动缓存；依赖安装在 build job（debian:13 容器内）完成。
+          package-manager-cache: false
 
       - name: Read locked dsh version
         id: locked
