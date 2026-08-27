@@ -46,7 +46,11 @@ asarUnpack:
 
 # 仅构建 Debian 13 / amd64 .deb（见 .github/workflows/build-debian.yml）
 linux:
-  icon: build/icon.png
+  # 指向 build/icons 目录（标准 hicolor 命名 <size>x<size>.png）：electron-builder
+  # 据此把各尺寸装进 /usr/share/icons/hicolor/<size>x<size>/apps/，桌面环境才能在
+  # 程序菜单显示图标。若指向单张 1024×1024 的 icon.png，app-builder 只会返回一个
+  # 1024 尺寸，而 hicolor 主题不声明 1024 目录 → 菜单图标不显示。
+  icon: build/icons
   category: Development
   target:
     - target: deb

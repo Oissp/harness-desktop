@@ -117,6 +117,31 @@ if (leaked.length === 0) {
   fail(`非目标平台 prebuild 泄入：${leaked.join(', ')}`)
 }
 
+console.log('\n[verify-deb] 桌面集成（.desktop + hicolor 图标）')
+// .desktop 文件应在 /usr/share/applications/<executableName>.desktop
+const desktopFiles = entries.filter((p) => p.startsWith('./usr/share/applications/') && p.endsWith('.desktop'))
+if (desktopFiles.length > 0) {
+  ok(`.desktop 文件存在：${desktopFiles[0].slice(2)}`)
+} else {
+  fail('缺 /usr/share/applications/*.desktop（应用不会出现在程序菜单）')
+}
+// hicolor 图标：freedesktop 标准尺寸 16/32/48/64/128/256/512（不含 1024，
+// index.theme 不声明 1024 目录，装到 1024x1024 桌面环境找不到 → 菜单无图标）
+const hicolorIcons = entries.filter((p) =>
+  /^\.\/usr\/share\/icons\/hicolor\/(\d+)x\1\/apps\/[^/]+\.png$/.test(p),
+)
+const sizes = hicolorIcons
+  .map((p) => p.match(/hicolor\/(\d+)x\1\//)?.[1])
+  .filter(Boolean)
+  .sort((a, b) => Number(a) - Number(b))
+if (sizes.length === 0) {
+  fail('缺 /usr/share/icons/hicolor/*/apps/ 图标（菜单不显示程序图标）')
+} else if (sizes.includes('1024') && sizes.length === 1) {
+  fail(`仅有 1024x1024 图标，hicolor 不声明该尺寸 → 菜单不显示（需 16–512 多尺寸）`)
+} else {
+  ok(`hicolor 图标尺寸：${sizes.join(', ')}`)
+}
+
 console.log(`\n[verify-deb] 条目总数：${entries.length}`)
 if (failures > 0) {
   console.error(`\n[verify-deb] ✗ 失败 ${failures} 项${warnings ? `，警告 ${warnings} 项` : ''}\n`)
