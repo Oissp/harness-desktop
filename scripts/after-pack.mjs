@@ -94,10 +94,11 @@ function loadDevDeps(projectRoot) {
   }
 }
 
-/** electron-builder Arch 枚举 → 字符串（context.arch 是数字）。 */
+/** electron-builder Arch 枚举 → 字符串（context.arch 是 Arch 枚举值）。
+ *  注意 Arch 的真实数值：ia32=0 x64=1 armv7l=2 arm64=3 universal=4
+ *  （builder-util/out/arch.d.ts）。 */
 function archName(arch) {
-  // electron-builder Arch：1=ia32 2=x64 3=armv7l 4=arm64 5=universal
-  const map = { 1: 'ia32', 2: 'x64', 3: 'armv7l', 4: 'arm64', 5: 'universal' }
+  const map = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }
   return map[arch] ?? 'x64'
 }
 
