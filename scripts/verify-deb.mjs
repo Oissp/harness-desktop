@@ -7,12 +7,12 @@
  *   1. magic bytes：确认是合法的 ar 归档（deb 包格式）
  *   2. 关键运行时路径：@deepseek-ai/ 闭包、koffi 原生模块、主可执行文件
  *   3. 平台纯净性：不应出现非 linux-x64 的 prebuild（arm64/win32/darwin）
- *   4. 打印体积与包数摘要
+ *   4. 打印体积与条目摘要
  *
  * 用法：node scripts/verify-deb.mjs [out/xxx.deb]（缺省则取 out/*.deb 第一个）
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { openSync, readSync, closeSync, readdirSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 
 const deb = process.argv[2]
   ?? readdirSync('out').map((f) => `out/${f}`).filter((f) => f.endsWith('.deb')).sort()[0]
@@ -31,26 +31,41 @@ const ok = (msg) => console.log(`  ✓ ${msg}`)
 
 console.log(`\n[verify-deb] 校验 ${deb}（${(statSync(deb).size / 1024 / 1024).toFixed(1)} MB）`)
 
-// 1. magic bytes：deb 是 ar 归档，以 "!<arch>\n" 开头，首个成员名 debian-binary
-const head = readFileSync(deb, { encoding: 'ascii', end: 16 })
-// ar 魔数占 8 字节；随后是 60 字节的 debian-binary 成员头，成员名在第 0~15 字节
-const magic = head.slice(0, 8)
-const memberName = head.slice(8, 16).trim()
-if (magic === '!<arch>\n' && memberName === 'debian-binary') {
-  ok('magic bytes：合法 deb（ar 归档 + debian-binary）')
+// 1. magic bytes：deb 是 ar 归档，以 "!<arch>\n"（8 字节）开头，紧随的成员名为
+//    "debian-binary"（ar 头部成员名字段为 16 字节，偏移 8..24）。只读前 68 字节
+//    足够覆盖 magic + 首个 ar 头，避免把 100MB+ 的 deb 整体读进内存。
+const fd = openSync(deb, 'r')
+const buf = Buffer.alloc(68)
+const bytesRead = readSync(fd, buf, 0, 68, 0)
+closeSync(fd)
+if (bytesRead >= 24) {
+  const magic = buf.subarray(0, 8).toString('latin1')
+  // 成员名是 16 字节、空格填充，trim 后应为 "debian-binary"
+  const member = buf.subarray(8, 24).toString('latin1').trim()
+  if (magic === '!<arch>\n' && member === 'debian-binary') {
+    ok('magic bytes：合法 deb（ar 归档 + debian-binary）')
+  } else {
+    fail(`magic bytes 不符：magic=${JSON.stringify(magic)} member=${JSON.stringify(member)}`)
+  }
 } else {
-  fail(`magic bytes 不符：magic=${JSON.stringify(magic)} member=${JSON.stringify(memberName)}`)
+  fail(`文件过短，无法读取 ar 头（${bytesRead} 字节）`)
 }
 
-// 后续校验基于 dpkg-deb 内容清单
-const listing = execFileSync('dpkg-deb', ['-c', deb], { encoding: 'utf8' })
-// dpkg-deb -c 输出形如 "drwxr-xr-x 0/0      0 2026-..  ./path/"，取路径列
-const entries = listing
+// 后续校验基于 dpkg-deb 内容清单。大 deb 的清单可能数 MB，execFileSync 默认
+// maxBuffer=1MB 会 ENOBUFS，这里放到 64MB。
+const res = spawnSync('dpkg-deb', ['-c', deb], {
+  encoding: 'utf8',
+  maxBuffer: 64 * 1024 * 1024,
+})
+if (res.status !== 0) {
+  fail(`dpkg-deb -c 失败（status=${res.status}）：${res.stderr?.trim() ?? ''}`)
+  console.error(`\n[verify-deb] ✗ 无法读取内容清单，终止\n`)
+  process.exit(1)
+}
+// dpkg-deb -c 输出形如 "drwxr-xr-x 0/0  0 2026-..  ./path/"，取从 './' 起的路径
+const entries = res.stdout
   .split('\n')
-  .map((line) => line.trim())
-  .filter(Boolean)
   .map((line) => {
-    // 路径是最后一个 ./... 字段，取从 './' 起的部分
     const m = line.match(/(\.\/\S.*)$/)
     return m ? m[1] : ''
   })
@@ -76,24 +91,20 @@ if (has((p) => /^\.\/opt\/[^/]+\/[^/]+$/.test(p))) {
 }
 
 console.log('\n[verify-deb] 平台纯净性（不应有非 linux-x64 的 prebuild）')
-const leaked = entries.filter((p) =>
-  /\/node_modules\/[^/]+(@koromix\/koffi|@img\/sharp|@esbuild|@vscode\/ripgrep)?[^/]*-(linux-arm64|win32-x64|win32-ia32|darwin-x64|darwin-arm64|freebsd-)/.test(p) ||
-  /\/node_modules\/@(koromix|img|esbuild)\/[^/]+-(linux-arm64|win32-|darwin-|freebsd-)/.test(p),
-)
-// 取泄露的包名（去重），仅报包根
-const leakedPkgs = new Set(
-  leaked
-    .map((p) => {
-      const m = p.match(/\/node_modules\/(@[^/]+\/[^/]+|[^/]+)/)
-      return m ? m[1] : null
-    })
-    .filter(Boolean)
-    .filter((n) => /-(linux-arm64|win32-|darwin-|freebsd-)/.test(n)),
-)
-if (leakedPkgs.size === 0) {
+// 收集所有 node_modules 下的包名（顶层或 @scope/name），去重
+const pkgs = new Set()
+for (const p of entries) {
+  const m = p.match(/\/node_modules\/(@[^/]+\/[^/]+|[^/]+)/)
+  if (m) pkgs.add(m[1])
+}
+// 平台 prebuild 包名形如 <pkg>-<platform>-<arch>；目标是 linux-x64，
+// 其余 platform/arch 组合都是非目标 prebuild，不该进 x64 产物
+const NON_TARGET = /-(linux|win32|darwin|freebsd)-(arm64|ia32|armv7l|x64)$/
+const leaked = [...pkgs].filter((n) => NON_TARGET.test(n) && !n.endsWith('-linux-x64'))
+if (leaked.length === 0) {
   ok('无非目标平台 prebuild 泄入')
 } else {
-  fail(`非目标平台 prebuild 泄入：${[...leakedPkgs].join(', ')}`)
+  fail(`非目标平台 prebuild 泄入：${leaked.join(', ')}`)
 }
 
 console.log(`\n[verify-deb] 条目总数：${entries.length}`)
