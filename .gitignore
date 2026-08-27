@@ -11,3 +11,6 @@ prompts/
 
 # pnpm 项目级 store（内容寻址缓存，不入库）
 .pnpm-store/
+
+# Claude Code 本地指南（不入库）
+CLAUDE.md
