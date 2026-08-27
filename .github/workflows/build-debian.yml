@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.21.0
 
@@ -145,7 +145,7 @@ jobs:
 
       - name: Upload bumped source
         if: steps.diff.outputs.changed == 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: bumped-source
           path: |
@@ -167,7 +167,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download bumped source
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: bumped-source
           path: .
@@ -248,7 +248,7 @@ jobs:
           dpkg-deb -c "$DEB" | head -30
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: harness-desktop-deb
           path: out/*.deb
@@ -263,13 +263,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download bumped source
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: bumped-source
           path: .
 
       - name: Download .deb artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: harness-desktop-deb
           path: release-assets
@@ -287,7 +287,7 @@ jobs:
           git push
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # tag 与 dsh 上游 tag 对齐（dsh-v<版本>），便于追溯对应的上游 release
           tag_name: dsh-v${{ needs.sync.outputs.new_version }}
