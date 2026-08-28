@@ -36,8 +36,25 @@ function resolveDshBin(): string {
   throw new Error('无法定位 dsh 引擎（@deepseek-ai/dsh/lib/bin.js）')
 }
 
-/** 解析可用的 Node 二进制。开发环境用系统 node；打包环境用 electron-as-node。 */
+/**
+ * 解析可用的 Node 二进制。
+ * 优先级：vendored 独立 node > 系统 node > electron-as-node。
+ *
+ * vendored node（vendor/node/node 或 node.exe）ABI 与系统 Node 一致，
+ * 预编译原生模块（koffi/node-pty）能正常加载，避免 ELECTRON_RUN_AS_NODE
+ * 下 ABI 不匹配导致的模块加载失败。
+ */
 function resolveNodeBinary(): { exec: string; isElectron: boolean } {
+  // 1. vendored 独立 Node（fetch-node.mjs 产物）——打包后也在 app 目录内
+  const binName = process.platform === 'win32' ? 'node.exe' : 'node'
+  const vendoredCandidates = [
+    join(app.getAppPath(), 'vendor', 'node', binName),
+    join(process.resourcesPath ?? '', 'app', 'vendor', 'node', binName),
+  ]
+  for (const c of vendoredCandidates) {
+    if (existsSync(c)) return { exec: c, isElectron: false }
+  }
+  // 2. 系统 node（开发环境）
   const fromNpm =
     process.env.npm_node_execpath ||
     process.env.npm_config_node_execpath ||
@@ -45,6 +62,7 @@ function resolveNodeBinary(): { exec: string; isElectron: boolean } {
   if (fromNpm && existsSync(fromNpm)) {
     return { exec: fromNpm, isElectron: false }
   }
+  // 3. 兜底：electron-as-node
   return { exec: process.execPath, isElectron: true }
 }
 

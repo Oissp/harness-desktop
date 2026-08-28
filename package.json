@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fetch-node": "node scripts/fetch-node.mjs",
     "dist": "pnpm build && electron-builder --linux deb --x64"
   },
   "dependencies": {
