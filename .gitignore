@@ -6,6 +6,9 @@ out/
 *.log
 .env
 
+# vendored 独立 Node 运行时（fetch-node.mjs 产物，构建时获取，不入库）
+vendor/node/
+
 # 提示词文件不上传（内部工作流）
 prompts/
 

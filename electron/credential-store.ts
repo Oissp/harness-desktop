@@ -44,6 +44,19 @@ export function createCredentialStore(userDataDir: string) {
     return safeStorage.isEncryptionAvailable()
   }
 
+  /** 读取并解密一个值。不存在或解密失败返回 undefined。 */
+  function get(ref: string): string | undefined {
+    const all = readAll()
+    const encrypted = all[ref]
+    if (!encrypted) return undefined
+    if (!isAvailable()) return undefined
+    try {
+      return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    } catch {
+      return undefined
+    }
+  }
+
   /** 加密一个值存盘。返回是否成功。 */
   function set(ref: string, plain: string): boolean {
     if (!isAvailable()) {
@@ -78,7 +91,7 @@ export function createCredentialStore(userDataDir: string) {
     if (changed) writeAll(all)
   }
 
-  return { set, unset, migrateFromPlain, isAvailable }
+  return { get, set, unset, migrateFromPlain, isAvailable }
 }
 
 /** 应用级 userData 目录。 */

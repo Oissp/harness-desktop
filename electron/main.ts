@@ -355,6 +355,15 @@ app.whenReady().then(async () => {
   // 端口跟随：引擎崩溃重启换端口 → 窗口重新 loadURL 新端口（A0 端口漂移）
   manager.onStatus((s) => {
     if (s.port && s.ready) loadEngineUI(s.port)
+    // 崩溃恢复态：引擎已死，窗口回退到本地 React UI（展示恢复页）
+    if (s.recovery && !s.ready) {
+      loadedEnginePort = null
+      if (VITE_DEV_SERVER_URL) {
+        void mainWindow?.loadURL(VITE_DEV_SERVER_URL)
+      } else {
+        void mainWindow?.loadFile(join(app.getAppPath(), 'dist', 'index.html'))
+      }
+    }
   })
 
   app.on('activate', () => {

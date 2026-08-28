@@ -11,8 +11,11 @@ import type { DshManager } from './dsh-manager.js'
 import type { SettingsStore } from './settings-store.js'
 import { ReminderManager } from './reminder-manager.js'
 import { addMemory, clearMemories, deleteMemory, listMemories } from './memory.js'
+import { queryBalance, centsToYuan } from './balance.js'
+import { BalanceScheduler } from './balance-scheduler.js'
 import type { SafeCredentialStore } from './credential-store.js'
 import type {
+  BalanceResult,
   IpcResult,
   SessionStreamEvent,
   DshStatus,
@@ -138,6 +141,8 @@ export function registerIpc(
   ipcMain.handle('dsh:status', () => run(() => Promise.resolve(manager.status())))
   ipcMain.handle('dsh:ensure', () => run(() => manager.start()))
   ipcMain.handle('dsh:shutdown', () => run(() => manager.stop()))
+  // 手动重启内核（恢复页按钮；清除崩溃环后重新 boot）
+  ipcMain.handle('dsh:restart', () => run(() => manager.restart()))
   ipcMain.handle('dsh:describe', () =>
     run(async () => {
       const a = adapter()
@@ -298,6 +303,38 @@ export function registerIpc(
   )
   ipcMain.handle('reminder:delete', (_e, id: string) => run(async () => reminders.delete(id)))
 
+  // ---- 余额小部件（借鉴 dsh_desktop 的 balance-scheduler） ----
+  // 调度器：in-flight 去重 + 序列号守卫 + 指数退避 + 3 分钟轮询
+  const balanceScheduler = new BalanceScheduler({
+    query: async () => {
+      // 从凭证存储取 DeepSeek API Key（不入 renderer 往返）
+      const apiKey = creds.get('DEEPSEEK_API_KEY') ?? ''
+      return queryBalance(apiKey)
+    },
+    push: (result) => {
+      // 归一化成 renderer 友好的 BalanceResult（分→元字符串）
+      const br: BalanceResult = {
+        ok: result.ok,
+        error: result.error,
+        totalYuan: result.totalBalanceCents != null ? centsToYuan(result.totalBalanceCents) : undefined,
+        usedYuan: result.usedCents != null ? centsToYuan(result.usedCents) : undefined,
+        remainingYuan: result.remainingCents != null ? centsToYuan(result.remainingCents) : undefined,
+        currency: result.currency,
+        fetchedAt: result.fetchedAt,
+      }
+      getWindow()?.webContents.send('balance:changed', br)
+    },
+  })
+  // 引擎就绪后启动调度器（需要 API Key 才有意义）
+  manager.onStatus((s) => {
+    if (s.ready) balanceScheduler.start()
+    else if (!s.running) balanceScheduler.stop()
+  })
+  ipcMain.handle('balance:refresh', () => run(async () => {
+    balanceScheduler.refresh(true)
+    return { ok: true, fetchedAt: Date.now() } as BalanceResult
+  }))
+
   // ---- Part A：记忆管理（harness-memory 存储文件） ----
   ipcMain.handle('memory:list', () => run(async () => listMemories(manager.home)))
   ipcMain.handle('memory:add', (_e, text: string, tags?: string[]) =>
@@ -420,5 +457,6 @@ export function registerIpc(
     manager.adapterInstance?.close()
     unsubStatus()
     reminders.stop()
+    balanceScheduler.stop()
   }
 }

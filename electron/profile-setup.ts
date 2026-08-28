@@ -10,11 +10,15 @@
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { activeCompanionPlugins } from './plugin-manifest.js'
+import { healCorruptConfig } from './guard-snapshot.js'
 
-/** 需要安装进 profile 的本地插件（dsh bundle 格式）。 */
-const BUNDLE_PLUGINS = [
-  'harness-memory',
-]
+/**
+ * 需要安装进 profile 的本地插件（dsh bundle 格式）。
+ * 从 plugin-manifest.ts 的声明式清单读取（单一来源），
+ * 不再硬编码——新增/禁用插件只改清单不改安装逻辑。
+ */
+const BUNDLE_PLUGINS = activeCompanionPlugins().map((p) => p.id)
 
 export type ProfileSetupResult =
   | { status: 'ready' } // profile 就绪且插件已安装
@@ -62,9 +66,27 @@ function installOne(dshHome: string, appPath: string, name: string): boolean {
 /** 检查 profile 与插件状态。 */
 export function checkProfile(dshHome: string, appPath: string): ProfileSetupResult {
   const profileDir = join(dshHome, 'profiles', 'web')
-  if (!existsSync(join(profileDir, 'package.json'))) {
+  const manifestPath = join(profileDir, 'package.json')
+  if (!existsSync(manifestPath)) {
     return { status: 'needs-priming' }
   }
+  // 坏配置自愈：损坏的 package.json 隔离成 .broken-<ts> 后从模板重建。
+  // 借鉴 dsh_desktop 的 profile-bundle-heal.js：坏 package.json 备份再重建，
+  // 而不是让整个 boot 崩溃。
+  healCorruptConfig(manifestPath, () => {
+    // 重建：最小可启动的 profile package.json 骨架
+    return JSON.stringify(
+      {
+        name: 'web-profile',
+        version: '1.0.0',
+        private: true,
+        dsh: { profile: { bundles: BUNDLE_PLUGINS.slice() } },
+      },
+      null,
+      2,
+    ) + '\n'
+  })
+
   let anyFail = false
   // 总是同步本地插件源码到 profile（保证改动即时生效，覆盖旧版本）
   for (const name of BUNDLE_PLUGINS) {

@@ -16,6 +16,8 @@ export interface DshStatus {
   provider: string | null
   model: string | null
   error?: string
+  /** 是否处于崩溃恢复态（崩溃环触发，需用户手动重启或已进入恢复页）。 */
+  recovery?: boolean
 }
 
 /** 应用级设置（存储在 userData 下，与 dsh 数据分开）。 */
@@ -132,6 +134,22 @@ export interface WebSearchConfig {
   apiVersion: string
   baseURL?: string
   maxUses?: number
+}
+
+/** 余额信息（归一化，renderer 友好）。 */
+export interface BalanceResult {
+  ok: boolean
+  error?: string
+  /** 总余额（元，字符串保留 2 位小数）。 */
+  totalYuan?: string
+  /** 已用额度（元）。 */
+  usedYuan?: string
+  /** 剩余额度（元）。 */
+  remainingYuan?: string
+  /** 货币符号。 */
+  currency?: string
+  /** 查询时间戳。 */
+  fetchedAt: number
 }
 
 /** 一个技能（skill.list 的归一化视图）。 */
@@ -356,6 +374,8 @@ export interface HarnessApi {
   getDshStatus(): Promise<IpcResult<DshStatus>>
   ensureDsh(): Promise<IpcResult<DshStatus>>
   shutdownDsh(): Promise<IpcResult<void>>
+  /** 手动重启内核（恢复页"重启内核"按钮；清除崩溃环检测器后重新 boot）。 */
+  restartDsh(): Promise<IpcResult<DshStatus>>
   describe(): Promise<IpcResult<DshStatus>>
 
   // ---- 021 自动更新 ----
@@ -406,6 +426,10 @@ export interface HarnessApi {
   togglePlanMode(sessionId: string): Promise<IpcResult<void>>
   getWebSearchConfig(): Promise<IpcResult<WebSearchConfig>>
   setWebSearchConfig(config: Partial<WebSearchConfig>): Promise<IpcResult<WebSearchConfig>>
+  /** 手动刷新余额（强制跳过节流）。 */
+  refreshBalance(): Promise<IpcResult<BalanceResult>>
+  /** 订阅余额变化推送。 */
+  onBalanceChanged(cb: (result: BalanceResult) => void): () => void
   exportSession(sessionId: string, format: 'zip' | 'json' | 'markdown'): Promise<IpcResult<{ saved: boolean; path?: string }>>
   listSkills(sessionId: string): Promise<IpcResult<SkillInfo[]>>
 

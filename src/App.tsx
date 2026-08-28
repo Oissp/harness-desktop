@@ -12,6 +12,7 @@ export default function App() {
   const [dshStatus, setDshStatus] = useState<DshStatus | null>(null)
   const [booting, setBooting] = useState(true)
   const [fatal, setFatal] = useState<string | null>(null)
+  const [restarting, setRestarting] = useState(false)
   const [sessionListVersion, setSessionListVersion] = useState(0)
 
   useEffect(() => {
@@ -105,6 +106,36 @@ export default function App() {
         <div className="boot-text">{fatal}</div>
         <button className="btn primary" onClick={() => window.location.reload()}>
           重试
+        </button>
+      </div>
+    )
+  }
+
+  // 崩溃恢复态：引擎反复崩溃已触发崩溃环熔断，展示恢复页 + 手动重启按钮
+  if (dshStatus?.recovery) {
+    return (
+      <div className="boot-screen">
+        <WhaleLogo className="boot-logo" />
+        <div className="boot-text">引擎反复崩溃，已进入恢复模式</div>
+        <div className="boot-subtext" style={{ fontSize: 13, color: 'var(--dsw-text-2)', marginTop: 4, maxWidth: 420, textAlign: 'center' }}>
+          {dshStatus.error ?? '内核在短时间内多次崩溃，已停止自动重启。你可以检查配置后手动重启内核。'}
+        </div>
+        <button
+          className="btn primary"
+          disabled={restarting}
+          onClick={async () => {
+            setRestarting(true)
+            try {
+              const res = await harness.restartDsh()
+              if (!res.ok && res.error) setFatal(res.error.message)
+            } catch (e) {
+              setFatal((e as Error).message)
+            } finally {
+              setRestarting(false)
+            }
+          }}
+        >
+          {restarting ? '正在重启…' : '重启内核'}
         </button>
       </div>
     )

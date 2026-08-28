@@ -5,6 +5,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
+  BalanceResult,
   CustomProviderConfig,
   DshStatus,
   HarnessApi,
@@ -27,6 +28,7 @@ const api: HarnessApi = {
   getDshStatus: () => call('dsh:status'),
   ensureDsh: () => call('dsh:ensure'),
   shutdownDsh: () => call('dsh:shutdown'),
+  restartDsh: () => call('dsh:restart'),
   describe: () => call('dsh:describe'),
 
   listSessions: () => call('session:list'),
@@ -72,6 +74,7 @@ const api: HarnessApi = {
   togglePlanMode: (sessionId: string) => call('plan:toggle', sessionId),
   getWebSearchConfig: () => call('websearch:get'),
   setWebSearchConfig: (config: Partial<WebSearchConfig>) => call('websearch:set', config),
+  refreshBalance: () => call('balance:refresh'),
   exportSession: (sessionId: string, format: 'zip' | 'json' | 'markdown') => call('session:export', sessionId, format),
   listSkills: (sessionId: string) => call('skill:list', sessionId),
 
@@ -106,6 +109,11 @@ const api: HarnessApi = {
       cb(status)
     ipcRenderer.on('update:status', listener)
     return () => ipcRenderer.removeListener('update:status', listener)
+  },
+  onBalanceChanged: (cb: (result: BalanceResult) => void) => {
+    const listener = (_e: unknown, result: BalanceResult) => cb(result)
+    ipcRenderer.on('balance:changed', listener)
+    return () => ipcRenderer.removeListener('balance:changed', listener)
   },
 }
 
