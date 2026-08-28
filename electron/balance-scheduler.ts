@@ -44,6 +44,8 @@ export class BalanceScheduler {
   private retryIndex = 0
   /** 是否已启动。 */
   private started = false
+  /** 最近一次查询结果（供 IPC 同步返回，避免 handler 伪造成功）。 */
+  private lastResult: BalanceInfo | null = null
 
   constructor(deps: BalanceSchedulerDeps) {
     this.deps = deps
@@ -60,6 +62,7 @@ export class BalanceScheduler {
   /** 停止所有定时器。 */
   stop(): void {
     this.started = false
+    this.lastResult = null
     if (this.pollTimer) {
       clearTimeout(this.pollTimer)
       this.pollTimer = null
@@ -68,6 +71,11 @@ export class BalanceScheduler {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  /** 最近一次查询结果（null = 尚未查询过）。IPC refresh handler 用它返回真实结果。 */
+  getLastResult(): BalanceInfo | null {
+    return this.lastResult
   }
 
   /**
@@ -91,6 +99,7 @@ export class BalanceScheduler {
       const result = await this.inflight
       // 最新序列号守卫：只处理最新请求的结果
       if (mySeq === this.seq) {
+        this.lastResult = result
         this.deps.push(result)
         if (result.ok) {
           // 成功 → 重置重试

@@ -75,3 +75,19 @@ export async function queryBalance(apiKey: string, baseURL: string = DEFAULT_BAS
 export function centsToYuan(cents: number): string {
   return (cents / 100).toFixed(2)
 }
+
+/**
+ * 把数据层 BalanceInfo 归一化成 renderer 友好的 BalanceResult（分→元字符串）。
+ * push 推送与 IPC refresh 返回共用此转换，避免 handler 伪造成功。
+ */
+export function toBalanceResult(info: BalanceInfo): import('../shared/types.js').BalanceResult {
+  return {
+    ok: info.ok,
+    error: info.error,
+    totalYuan: info.totalBalanceCents != null ? centsToYuan(info.totalBalanceCents) : undefined,
+    usedYuan: info.usedCents != null ? centsToYuan(info.usedCents) : undefined,
+    remainingYuan: info.remainingCents != null ? centsToYuan(info.remainingCents) : undefined,
+    currency: info.currency,
+    fetchedAt: info.fetchedAt,
+  }
+}

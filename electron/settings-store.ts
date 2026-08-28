@@ -36,15 +36,25 @@ export class SettingsStore {
   }
 
   /**
-   * 读取设置文件。损坏时隔离成 .broken-<ts> 后用默认值继续（不崩溃）。
+   * 读取设置文件。JSON 损坏时隔离成 .broken-<ts> 后用默认值继续（不崩溃）。
    * 借鉴 dsh_desktop 的 settings 损坏自愈：坏 JSON → 隔离 .broken → 从空配置继续。
+   *
+   * 仅在 *解析失败*（确属文件损坏）时隔离；文件系统瞬时错误（EPERM/EBUSY
+   * 等杀软扫描、文件锁）保留原文件，下次读取仍可成功——避免误隔离有效数据。
    */
   private read(): Partial<AppSettings> {
     if (!existsSync(this.file)) return {}
+    let raw: string
     try {
-      return JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AppSettings>
+      raw = readFileSync(this.file, 'utf8')
     } catch {
-      // 文件损坏 → 隔离成 .broken-<ts>，避免反复解析失败
+      // 文件系统错误（锁、权限、瞬时不可读）：不动文件，降级返回默认
+      return {}
+    }
+    try {
+      return JSON.parse(raw) as Partial<AppSettings>
+    } catch {
+      // 内容确属损坏 → 隔离成 .broken-<ts>，避免反复解析失败
       const broken = `${this.file}.broken-${Date.now()}`
       try {
         renameSync(this.file, broken)

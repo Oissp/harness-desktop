@@ -20,6 +20,13 @@ import { healCorruptConfig } from './guard-snapshot.js'
  */
 const BUNDLE_PLUGINS = activeCompanionPlugins().map((p) => p.id)
 
+/**
+ * web profile 的核心 in-box bundle（来自 dsh-app-boot 的 PROFILE_TEMPLATES.web）。
+ * 坏配置自愈重建时必须保留这些核心层，否则 dsh 会丢掉 base/web-app，
+ * 启动后核心功能缺失或引用未定义。本地插件叠在核心层之后。
+ */
+const CORE_PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+
 export type ProfileSetupResult =
   | { status: 'ready' } // profile 就绪且插件已安装
   | { status: 'needs-priming' } // profile 尚未初始化，需要先跑一次引擎
@@ -75,12 +82,14 @@ export function checkProfile(dshHome: string, appPath: string): ProfileSetupResu
   // 而不是让整个 boot 崩溃。
   healCorruptConfig(manifestPath, () => {
     // 重建：最小可启动的 profile package.json 骨架
+    // bundles 必须含核心 in-box 层（base + web-app），再叠本地插件；
+    // 只写插件会丢掉核心层，dsh 启动后功能缺失
     return JSON.stringify(
       {
         name: 'web-profile',
         version: '1.0.0',
         private: true,
-        dsh: { profile: { bundles: BUNDLE_PLUGINS.slice() } },
+        dsh: { profile: { bundles: [...CORE_PROFILE_BUNDLES, ...BUNDLE_PLUGINS] } },
       },
       null,
       2,

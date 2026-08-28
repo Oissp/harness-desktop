@@ -126,6 +126,12 @@ interface DesktopBridge {
   notify(title: string, body: string): Promise<void>
   onEnginePort(cb: (port: number | null) => void): () => void
   onMenuEvent(cb: (action: 'new-chat' | 'open-settings') => void): () => void
+  /** 最近一次余额结果（null = 尚未查询）。官方 UI 余额小部件初始化用。 */
+  getBalance(): Promise<BalanceResult | null>
+  /** 强制刷新余额，返回真实结果（不再伪造成功）。 */
+  refreshBalance(): Promise<IpcResult<BalanceResult>>
+  /** 余额变化推送（调度器轮询/重试后触发）。 */
+  onBalanceChanged(cb: (result: BalanceResult) => void): () => void
 }
 
 const desktop: DesktopBridge = {
@@ -156,6 +162,16 @@ const desktop: DesktopBridge = {
       ipcRenderer.removeListener('menu:new-chat', onNew)
       ipcRenderer.removeListener('menu:open-settings', onSettings)
     }
+  },
+  getBalance: async () => {
+    const res = await call<BalanceResult | null>('desktop:getBalance')
+    return res.ok ? (res.value ?? null) : null
+  },
+  refreshBalance: () => call<BalanceResult>('balance:refresh'),
+  onBalanceChanged: (cb) => {
+    const listener = (_e: unknown, result: BalanceResult) => cb(result)
+    ipcRenderer.on('balance:changed', listener)
+    return () => ipcRenderer.removeListener('balance:changed', listener)
   },
 }
 
@@ -340,3 +356,92 @@ function injectDesktopBrand() {
 }
 
 injectDesktopBrand()
+
+/**
+ * 余额小部件注入（官方 UI 页面）：右下角 fixed 余额胶囊，点击刷新。
+ *
+ * 桌面 React UI 的 BalanceWidget 只在 boot/回退屏可见——引擎就绪后窗口跳转
+ * 到官方 UI，React 应用不再驻留，余额无处展示。这里在官方 UI 注入一个
+ * 独立 DOM 胶囊，通过 __desktop__ 桥消费调度器推送，补齐正常运行的展示。
+ *
+ * 仅在引擎 UI（http://127.0.0.1）注入，避免与桌面 React UI 的组件重复。
+ */
+function injectBalanceWidget() {
+  // 仅在引擎 UI 注入：引擎以 --host 127.0.0.1 启动，URL 形如 http://127.0.0.1:<port>。
+  // 桌面 React UI 是 file://（prod）或 localhost:5173（dev），不匹配 → 避免与
+  // React BalanceWidget 重复显示。
+  if (location.hostname !== '127.0.0.1') return
+
+  const PILL_ID = 'hd-balance-pill'
+
+  const resolveColors = (): { fg: string; muted: string; bg: string; border: string } => {
+    const sidebar = document.querySelector('[class*="sidebarCol"], [class*="sidebar"]')
+    const probe = sidebar ?? document.body
+    const style = probe ? getComputedStyle(probe) : null
+    const rgb = style?.backgroundColor ?? ''
+    const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(rgb)
+    const dark = !m || Number(m[1]) * 0.299 + Number(m[2]) * 0.587 + Number(m[3]) * 0.114 <= 140
+    return dark
+      ? { fg: '#e8eaf1', muted: '#9aa3b2', bg: 'rgba(22,26,33,0.86)', border: 'rgba(255,255,255,0.08)' }
+      : { fg: '#111418', muted: '#5a6472', bg: 'rgba(255,255,255,0.92)', border: 'rgba(0,0,0,0.08)' }
+  }
+
+  const render = (result: BalanceResult | null, refreshing: boolean) => {
+    let el = document.getElementById(PILL_ID)
+    if (!result) {
+      el?.remove()
+      return
+    }
+    const c = resolveColors()
+    if (!el) {
+      el = document.createElement('button')
+      el.id = PILL_ID
+      el.style.cssText =
+        'position:fixed;right:16px;bottom:16px;z-index:2147483646;display:inline-flex;' +
+        'align-items:center;gap:6px;padding:6px 12px;border-radius:999px;cursor:pointer;' +
+        'font:600 12px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif;border:1px solid ' + c.border +
+        ';background:' + c.bg + ';color:' + c.fg + ';backdrop-filter:blur(8px);' +
+        '-webkit-backdrop-filter:blur(8px);box-shadow:0 2px 10px rgba(0,0,0,0.18);' +
+        'transition:opacity .15s;user-select:none;'
+      el.addEventListener('click', () => {
+        el?.style.setProperty('opacity', '0.6')
+        void desktop.refreshBalance()
+      })
+      document.body.appendChild(el)
+    }
+    el.style.borderColor = c.border
+    el.style.background = c.bg
+    el.style.color = c.fg
+    el.style.opacity = refreshing ? '0.6' : '1'
+    if (!result.ok) {
+      el.title = result.error ?? '余额查询失败'
+      el.innerHTML = '<span style="color:' + c.muted + '">余额查询失败</span>'
+      return
+    }
+    const amount = result.remainingYuan ?? result.totalYuan ?? '—'
+    const cur = result.currency === 'CNY' ? '¥' : result.currency ? result.currency + ' ' : '¥'
+    el.title = `总余额 ${result.totalYuan ?? '—'} · 已用 ${result.usedYuan ?? '—'} · 点击刷新`
+    el.innerHTML =
+      '<span style="color:' + c.muted + ';font-weight:500">余额</span>' +
+      '<span>' + (refreshing ? '…' : cur + amount) + '</span>'
+  }
+
+  // 订阅推送：刷新完成时渲染最新结果（ipcRenderer 监听不依赖 DOM 就绪）
+  desktop.onBalanceChanged((result) => {
+    render(result, false)
+  })
+
+  const init = () => {
+    // 初始拉取最近结果（页面刷新/导航后胶囊重建）
+    void desktop.getBalance().then((r) => {
+      if (r) render(r, false)
+    })
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true })
+  } else {
+    init()
+  }
+}
+
+injectBalanceWidget()

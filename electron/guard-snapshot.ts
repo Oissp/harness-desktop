@@ -15,11 +15,16 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { join } from 'node:path'
 import { app } from 'electron'
 
-/** 受守护的关键配置文件（相对 dshHome 的路径）。 */
+/**
+ * 受守护的关键配置文件（相对 dshHome 的路径）。
+ *
+ * 注意：不纳入 `.credentials.yaml`——它是明文 API Key，快照会在磁盘上留下
+ * 第二份持久明文副本，且 restoreFromLastGood 可能把已轮换的 Key 回滚成旧值，
+ * 静默破坏鉴权。凭据由 credential-store 的 safeStorage 加密层独立管理。
+ */
 const GUARD_FILES = [
   'profiles/web/package.json',
   'profiles/web/cordis.patch.yml',
-  '.credentials.yaml',
 ] as const
 
 /** 快照根目录。 */
@@ -35,41 +40,47 @@ function snapshotDir(kind: 'pending' | 'last-good'): string {
 }
 
 /**
- * boot 前拍快照：把 GUARD_FILES 中存在的文件复制到 pending/。
+ * 把 dshHome 中存在的 GUARD_FILES 复制成扁平副本到目标快照目录。
  * 不存在则跳过（首次启动时 profile 尚未创建）。
  */
-export function takeBootSnapshot(dshHome: string): void {
-  const dir = snapshotDir('pending')
-  // 清空 pending
-  for (const f of readdirSync(dir)) {
-    rmSync(join(dir, f), { force: true })
-  }
+function snapshotLiveConfig(dshHome: string, destDir: string): void {
   for (const rel of GUARD_FILES) {
     const src = join(dshHome, rel)
     if (existsSync(src)) {
       const basename = rel.split('/').pop()!
-      cpSync(src, join(dir, basename))
+      cpSync(src, join(destDir, basename))
     }
   }
 }
 
+/** 清空一个快照目录（递归，兼容历史遗留的子目录条目）。 */
+function clearSnapshotDir(dir: string): void {
+  for (const f of readdirSync(dir)) {
+    rmSync(join(dir, f), { force: true, recursive: true })
+  }
+}
+
+/**
+ * boot 前拍快照：把当前 live 配置复制到 pending/（尚未确认良好的诊断快照）。
+ */
+export function takeBootSnapshot(dshHome: string): void {
+  const dir = snapshotDir('pending')
+  clearSnapshotDir(dir)
+  snapshotLiveConfig(dshHome, dir)
+}
+
 /**
  * 引擎稳定运行后调用（对应参考项目的 45s markGood）：
- * 把 pending 快照提升为 last-good。
+ * 把 *当前 live 配置*（已确认良好）提升为 last-good。
+ *
+ * 直接快照 live 而非复制 pending/——pending 是 boot 前拍的，可能正是导致
+ * 首次启动失败的那份坏配置；若复制它会把坏配置固化成 last-good，下次回滚
+ * 仍然落到坏配置，守护瀑布失效。
  */
-export function promoteToLastGood(): void {
-  const pending = snapshotDir('pending')
+export function promoteToLastGood(dshHome: string): void {
   const lastGood = snapshotDir('last-good')
-  // 清空 last-good
-  for (const f of readdirSync(lastGood)) {
-    rmSync(join(lastGood, f), { force: true })
-  }
-  // 复制 pending → last-good
-  if (existsSync(pending)) {
-    for (const f of readdirSync(pending)) {
-      cpSync(join(pending, f), join(lastGood, f))
-    }
-  }
+  clearSnapshotDir(lastGood)
+  snapshotLiveConfig(dshHome, lastGood)
 }
 
 /**

@@ -11,7 +11,7 @@ import type { DshManager } from './dsh-manager.js'
 import type { SettingsStore } from './settings-store.js'
 import { ReminderManager } from './reminder-manager.js'
 import { addMemory, clearMemories, deleteMemory, listMemories } from './memory.js'
-import { queryBalance, centsToYuan } from './balance.js'
+import { queryBalance, toBalanceResult } from './balance.js'
 import { BalanceScheduler } from './balance-scheduler.js'
 import type { SafeCredentialStore } from './credential-store.js'
 import type {
@@ -313,16 +313,7 @@ export function registerIpc(
     },
     push: (result) => {
       // 归一化成 renderer 友好的 BalanceResult（分→元字符串）
-      const br: BalanceResult = {
-        ok: result.ok,
-        error: result.error,
-        totalYuan: result.totalBalanceCents != null ? centsToYuan(result.totalBalanceCents) : undefined,
-        usedYuan: result.usedCents != null ? centsToYuan(result.usedCents) : undefined,
-        remainingYuan: result.remainingCents != null ? centsToYuan(result.remainingCents) : undefined,
-        currency: result.currency,
-        fetchedAt: result.fetchedAt,
-      }
-      getWindow()?.webContents.send('balance:changed', br)
+      getWindow()?.webContents.send('balance:changed', toBalanceResult(result))
     },
   })
   // 引擎就绪后启动调度器（需要 API Key 才有意义）
@@ -331,9 +322,21 @@ export function registerIpc(
     else if (!s.running) balanceScheduler.stop()
   })
   ipcMain.handle('balance:refresh', () => run(async () => {
-    balanceScheduler.refresh(true)
-    return { ok: true, fetchedAt: Date.now() } as BalanceResult
+    // 等待真实查询完成，返回实际结果（不再伪造 ok:true）
+    await balanceScheduler.refresh(true)
+    const last = balanceScheduler.getLastResult()
+    if (!last) {
+      return { ok: false, error: '尚无余额数据', fetchedAt: Date.now() } as BalanceResult
+    }
+    return toBalanceResult(last)
   }))
+  // 官方 UI 余额胶囊初始化用：返回调度器最近一次结果（null = 尚未查询）
+  ipcMain.handle('desktop:getBalance', () =>
+    run(async () => {
+      const last = balanceScheduler.getLastResult()
+      return last ? toBalanceResult(last) : null
+    }),
+  )
 
   // ---- Part A：记忆管理（harness-memory 存储文件） ----
   ipcMain.handle('memory:list', () => run(async () => listMemories(manager.home)))

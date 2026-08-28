@@ -213,7 +213,12 @@ export class DshManager {
     }
 
     // 守护瀑布：boot 前拍配置快照（失败时可回滚到 last-good）
-    takeBootSnapshot(this.dshHome)
+    // 快照失败不阻断 boot——磁盘满/权限问题不应阻止引擎启动，降级为无快照继续
+    try {
+      takeBootSnapshot(this.dshHome)
+    } catch (err) {
+      console.warn('[harness-desktop] 配置快照失败，跳过守护瀑布:', err)
+    }
 
     await this.spawn()
     try {
@@ -223,6 +228,10 @@ export class DshManager {
       const restored = restoreFromLastGood(this.dshHome)
       if (restored > 0) {
         console.warn('[harness-desktop] 检测到坏配置，已从最后良好快照回滚，重试启动…')
+        // 先停止第一次的子进程：waitUntilReady 超时意味着子进程可能仍存活，
+        // 直接再 spawn 会孤儿第一个进程，且其 exit handler 会回写 this.proc
+        // 竞态破坏第二个进程的生命周期状态
+        await this.stop()
         await this.spawn()
         return await this.waitUntilReady()
       }
@@ -334,8 +343,13 @@ export class DshManager {
         // 对应参考项目的 45s 稳定落定。若引擎在此期间崩溃，exit 回调会取消此计时器。
         if (this.stableTimer) clearTimeout(this.stableTimer)
         this.stableTimer = setTimeout(() => {
-          this.crashDetector.recordGoodBoot()
-          promoteToLastGood()
+          try {
+            this.crashDetector.recordGoodBoot()
+            promoteToLastGood(this.dshHome)
+          } catch (err) {
+            // 快照提升失败不 crash 主进程（磁盘满/目录被删等），仅记录
+            console.warn('[harness-desktop] 提升最后良好快照失败:', err)
+          }
           this.stableTimer = null
         }, STABLE_BOOT_MS)
         this.emitStatus()
