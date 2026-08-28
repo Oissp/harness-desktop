@@ -320,4 +320,7 @@ jobs:
           files: release-assets/*.deb
           generate_release_notes: false
           draft: false
-          prerelease: ${{ contains(needs.sync.outputs.new_version, 'rc') }}
+          # 任何含 '-' 的版本号都是 semver 预发布（alpha/beta/rc/dev 等），
+          # 标记为 prerelease，避免预发布版被当成正式版推送更新。
+          # 定时任务只跟 npm latest（稳定）；预发布版需手动 workflow_dispatch 指定版本号。
+          prerelease: ${{ contains(needs.sync.outputs.new_version, '-') }}

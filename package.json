@@ -6,7 +6,7 @@
   "type": "module",
   "author": "harness-desktop",
   "license": "MIT",
-  "homepage": "https://github.com/988hj7tczd-oss/harness-desktop",
+  "homepage": "https://github.com/Oissp/harness-desktop",
   "private": true,
   "packageManager": "pnpm@11.21.0",
   "scripts": {

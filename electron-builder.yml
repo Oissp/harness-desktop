@@ -5,7 +5,7 @@ copyright: Copyright © 2026 harness-desktop
 # 自动更新（021）：electron-updater 读取的发布源
 publish:
   provider: github
-  owner: 988hj7tczd-oss
+  owner: Oissp
   repo: harness-desktop
 
 directories:
