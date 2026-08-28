@@ -16,6 +16,8 @@ export interface DshStatus {
   provider: string | null
   model: string | null
   error?: string
+  /** 是否处于崩溃恢复态（崩溃环触发，需用户手动重启或已进入恢复页）。 */
+  recovery?: boolean
 }
 
 /** 应用级设置（存储在 userData 下，与 dsh 数据分开）。 */
@@ -356,6 +358,8 @@ export interface HarnessApi {
   getDshStatus(): Promise<IpcResult<DshStatus>>
   ensureDsh(): Promise<IpcResult<DshStatus>>
   shutdownDsh(): Promise<IpcResult<void>>
+  /** 手动重启内核（恢复页"重启内核"按钮；清除崩溃环检测器后重新 boot）。 */
+  restartDsh(): Promise<IpcResult<DshStatus>>
   describe(): Promise<IpcResult<DshStatus>>
 
   // ---- 021 自动更新 ----

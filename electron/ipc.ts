@@ -138,6 +138,8 @@ export function registerIpc(
   ipcMain.handle('dsh:status', () => run(() => Promise.resolve(manager.status())))
   ipcMain.handle('dsh:ensure', () => run(() => manager.start()))
   ipcMain.handle('dsh:shutdown', () => run(() => manager.stop()))
+  // 手动重启内核（恢复页按钮；清除崩溃环后重新 boot）
+  ipcMain.handle('dsh:restart', () => run(() => manager.restart()))
   ipcMain.handle('dsh:describe', () =>
     run(async () => {
       const a = adapter()

@@ -13,10 +13,16 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { DshAdapter } from '../adapter/index.js'
 import { checkProfile } from './profile-setup.js'
+import { CrashLoopDetector } from './crash-loop-detector.js'
+import { takeBootSnapshot, promoteToLastGood, restoreFromLastGood } from './guard-snapshot.js'
 import type { SessionStreamEvent } from '../shared/types.js'
 
 const READY_TIMEOUT_MS = 90_000
 const KILL_TIMEOUT_MS = 5_000
+/** 引擎稳定运行的判定时间：就绪后持续运行此时长才认定"稳定"，提升快照 + 重置崩溃环。 */
+const STABLE_BOOT_MS = 45_000
+/** 崩溃后自动重启延迟（ms）。 */
+const AUTO_RESTART_DELAY_MS = 2_000
 
 /** dsh bin.js 的候选路径（开发 = 项目 node_modules；打包 = asar 内）。 */
 function resolveDshBin(): string {
@@ -51,6 +57,8 @@ export interface DshManagerStatus {
   provider: string | null
   model: string | null
   error?: string
+  /** 是否处于崩溃恢复态（崩溃环触发，需用户手动重启或已进入恢复页）。 */
+  recovery?: boolean
 }
 
 export class DshManager {
@@ -64,6 +72,12 @@ export class DshManager {
   private model: string | null = null
   private lastError: string | null = null
   private stopping = false
+  /** 崩溃恢复态：崩溃环触发后置 true，停止自动重启，等待手动恢复。 */
+  private recovery = false
+  /** 引擎稳定运行计时器（markGood）：就绪后 STABLE_BOOT_MS 提升快照 + 重置崩溃环。 */
+  private stableTimer: ReturnType<typeof setTimeout> | null = null
+  /** 崩溃环检测器。 */
+  private crashDetector = new CrashLoopDetector()
   private statusListeners: ((s: DshManagerStatus) => void)[] = []
   /** 事件订阅者（renderer 通过 dsh:subscribe 注册）。adapter 未就绪时排队，创建/重建后自动接入。 */
   private eventListeners: ((evt: SessionStreamEvent) => void)[] = []
@@ -139,7 +153,20 @@ export class DshManager {
       provider: this.provider,
       model: this.model,
       error: this.lastError ?? undefined,
+      recovery: this.recovery,
     }
+  }
+
+  /**
+   * 手动重启内核（恢复页"重启内核"按钮调用）。
+   * 清除崩溃环检测器，重新走完整 boot 流程。
+   */
+  async restart(): Promise<DshManagerStatus> {
+    this.crashDetector.reset()
+    this.recovery = false
+    this.lastError = null
+    await this.stop()
+    return this.start()
   }
 
   /** 启动（若已就绪则直接返回）。返回就绪后的状态快照。 */
@@ -167,8 +194,22 @@ export class DshManager {
       console.warn('[harness-desktop] 记忆插件不可用（非致命）:', setup.reason)
     }
 
+    // 守护瀑布：boot 前拍配置快照（失败时可回滚到 last-good）
+    takeBootSnapshot(this.dshHome)
+
     await this.spawn()
-    return this.waitUntilReady()
+    try {
+      return await this.waitUntilReady()
+    } catch (err) {
+      // 第一层失败：尝试回滚坏配置后重试一次（对应守护瀑布第二层）
+      const restored = restoreFromLastGood(this.dshHome)
+      if (restored > 0) {
+        console.warn('[harness-desktop] 检测到坏配置，已从最后良好快照回滚，重试启动…')
+        await this.spawn()
+        return await this.waitUntilReady()
+      }
+      throw err
+    }
   }
 
   private async spawn(): Promise<void> {
@@ -201,6 +242,11 @@ export class DshManager {
     child.on('exit', (code, signal) => {
       const wasRunning = this.ready
       this.ready = false
+      // 引擎退出 → 取消稳定计时器（未达稳定，不提升快照）
+      if (this.stableTimer) {
+        clearTimeout(this.stableTimer)
+        this.stableTimer = null
+      }
       this.adapter?.close()
       this.adapter = null
       this.proc = null
@@ -215,11 +261,19 @@ export class DshManager {
       this.eventUnsubs = []
       if (!this.stopping) {
         this.lastError = `dsh 进程退出（code=${code ?? ''} signal=${signal ?? ''}）`
-        // 若已就绪后退出，尝试自动重启
         if (wasRunning) {
-          setTimeout(() => {
-            if (!this.stopping) void this.start().catch(() => undefined)
-          }, 1500)
+          // 崩溃环检测：决定是否自动重启
+          const verdict = this.crashDetector.recordCrash()
+          if (verdict === 'ok') {
+            // 允许自动重启（延迟，避免立即重启竞态）
+            setTimeout(() => {
+              if (!this.stopping) void this.start().catch(() => undefined)
+            }, AUTO_RESTART_DELAY_MS)
+          } else {
+            // 崩溃环触发 → 进入恢复态，停止自动重启
+            this.recovery = true
+            this.lastError = `引擎反复崩溃（${verdict === 'tripped' ? '快环' : '慢环'}熔断），已进入恢复态。请检查配置后重启内核。`
+          }
         }
       }
       this.emitStatus()
@@ -258,6 +312,14 @@ export class DshManager {
         } catch {
           // 描述失败不影响就绪
         }
+        // 守护瀑布 markGood：引擎稳定运行 STABLE_BOOT_MS 后提升快照 + 重置崩溃环。
+        // 对应参考项目的 45s 稳定落定。若引擎在此期间崩溃，exit 回调会取消此计时器。
+        if (this.stableTimer) clearTimeout(this.stableTimer)
+        this.stableTimer = setTimeout(() => {
+          this.crashDetector.recordGoodBoot()
+          promoteToLastGood()
+          this.stableTimer = null
+        }, STABLE_BOOT_MS)
         this.emitStatus()
         return this.status()
       }
@@ -271,6 +333,11 @@ export class DshManager {
   /** 优雅停止 dsh 子进程。 */
   async stop(): Promise<void> {
     this.stopping = true
+    // 停止时取消稳定计时器
+    if (this.stableTimer) {
+      clearTimeout(this.stableTimer)
+      this.stableTimer = null
+    }
     const child = this.proc
     if (!child) {
       this.stopping = false
