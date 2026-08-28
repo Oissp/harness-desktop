@@ -10,11 +10,14 @@
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { activeCompanionPlugins } from './plugin-manifest.js'
 
-/** 需要安装进 profile 的本地插件（dsh bundle 格式）。 */
-const BUNDLE_PLUGINS = [
-  'harness-memory',
-]
+/**
+ * 需要安装进 profile 的本地插件（dsh bundle 格式）。
+ * 从 plugin-manifest.ts 的声明式清单读取（单一来源），
+ * 不再硬编码——新增/禁用插件只改清单不改安装逻辑。
+ */
+const BUNDLE_PLUGINS = activeCompanionPlugins().map((p) => p.id)
 
 export type ProfileSetupResult =
   | { status: 'ready' } // profile 就绪且插件已安装
