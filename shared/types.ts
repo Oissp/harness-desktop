@@ -136,22 +136,6 @@ export interface WebSearchConfig {
   maxUses?: number
 }
 
-/** 余额信息（归一化，renderer 友好）。 */
-export interface BalanceResult {
-  ok: boolean
-  error?: string
-  /** 总余额（元，字符串保留 2 位小数）。 */
-  totalYuan?: string
-  /** 已用额度（元）。 */
-  usedYuan?: string
-  /** 剩余额度（元）。 */
-  remainingYuan?: string
-  /** 货币符号。 */
-  currency?: string
-  /** 查询时间戳。 */
-  fetchedAt: number
-}
-
 /** 一个技能（skill.list 的归一化视图）。 */
 export interface SkillInfo {
   name: string
@@ -426,10 +410,6 @@ export interface HarnessApi {
   togglePlanMode(sessionId: string): Promise<IpcResult<void>>
   getWebSearchConfig(): Promise<IpcResult<WebSearchConfig>>
   setWebSearchConfig(config: Partial<WebSearchConfig>): Promise<IpcResult<WebSearchConfig>>
-  /** 手动刷新余额（强制跳过节流）。 */
-  refreshBalance(): Promise<IpcResult<BalanceResult>>
-  /** 订阅余额变化推送。 */
-  onBalanceChanged(cb: (result: BalanceResult) => void): () => void
   exportSession(sessionId: string, format: 'zip' | 'json' | 'markdown'): Promise<IpcResult<{ saved: boolean; path?: string }>>
   listSkills(sessionId: string): Promise<IpcResult<SkillInfo[]>>
 

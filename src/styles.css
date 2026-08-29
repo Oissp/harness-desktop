@@ -1538,36 +1538,6 @@ select.input {
   border-color: var(--hd-accent-450);
   color: var(--dsw-label-primary);
 }
-/* 余额小部件（输入区右下角） */
-.balance-widget {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  background: var(--dsw-bg-layer-3);
-  border: 1px solid var(--dsw-border-l1);
-  border-radius: var(--dsw-radius-sm);
-  color: var(--dsw-label-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-.balance-widget:hover {
-  border-color: var(--hd-accent-450);
-  color: var(--dsw-label-primary);
-}
-.balance-widget:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-.balance-widget-label {
-  color: var(--dsw-label-tertiary, var(--dsw-label-secondary));
-}
-.balance-widget-amount {
-  font-weight: 600;
-  color: var(--hd-accent-450, var(--dsw-label-primary));
-}
 .send-btn {
   flex-shrink: 0;
 }

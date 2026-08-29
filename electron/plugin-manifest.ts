@@ -38,7 +38,6 @@ export const COMPANION_PLUGINS: CompanionPluginEntry[] = [
     description: '记忆自动沉淀（偏好/项目约定/成功做法）',
   },
   // 新增伴随插件在此添加，例如：
-  // { id: 'harness-balance', enabled: true, description: '余额小部件' },
   // { id: 'harness-pet', enabled: false, description: '桌面宠物（默认关）' },
 ]
 

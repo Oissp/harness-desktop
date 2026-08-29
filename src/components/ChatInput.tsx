@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type { AgentPresetInfo, PickedFile } from '../../shared/types'
 import ModelDisplay from './ModelDisplay'
-import BalanceWidget from './BalanceWidget'
 import type { ModelGroup } from '../../shared/types'
 
 interface Props {
@@ -158,7 +157,6 @@ export default function ChatInput({
           {modelGroups.length > 0 && (
             <ModelDisplay groups={modelGroups} selection={selection} onSelect={onSelectModel} />
           )}
-          <BalanceWidget />
           <button className="add-file-btn" onClick={pickFiles} title="添加文件">
             +
           </button>
