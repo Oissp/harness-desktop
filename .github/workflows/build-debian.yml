@@ -172,6 +172,17 @@ jobs:
           name: bumped-source
           path: .
 
+      # 缓存 electron-builder 的下载缓存（electron 42.9.3 zip ≈123MB + fpm/7zip ≈5MB），
+      # 容器 HOME 每次 run 都是全新目录，不缓存则每次重下（CI 日志每次都有 downloading 行）。
+      # key 只用 electron-builder.yml：electronVersion 与 deb 配置都钉在其中，dsh 版本升级不失效。
+      - name: Cache electron & electron-builder binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-eb-${{ hashFiles('electron-builder.yml') }}
+
       - name: Install build prerequisites (Debian 13)
         run: |
           # Debian 13 (trixie) 的软件源；更新并安装构建链。
@@ -245,7 +256,8 @@ jobs:
           echo "--- control ---"
           dpkg-deb -I "$DEB"
           echo "--- 内容(前30行) ---"
-          dpkg-deb -c "$DEB" | head -30
+          # 2>/dev/null 压掉 head -30 提前截断导致的 "tar subprocess was killed by signal (Broken pipe)"
+          dpkg-deb -c "$DEB" 2>/dev/null | head -30
 
       - name: Verify .deb integrity (PR #304 实践)
         run: |

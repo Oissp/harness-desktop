@@ -57,6 +57,10 @@ linux:
     - target: deb
       arch:
         - x64
+  # fpm 打 deb 的压缩是 CI 构建的最大瓶颈（默认 xz，CI 日志约 2 分钟）。
+  # 改用 gz：压缩快 5-10 倍，包体积略增（~10%）。dpkg 完全兼容 gzip 压缩的 deb。
+  deb:
+    compression: gz
   maintainer: harness-desktop <zhuanz@users.noreply.github.com>
 
 electronDownload:
