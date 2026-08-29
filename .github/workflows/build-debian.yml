@@ -192,7 +192,7 @@ jobs:
           # libnss3 / libgbm1 等是 Electron 运行时共享库依赖。
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            ca-certificates curl gnupg git python3 make g++ xz-utils zstd file \
+            ca-certificates curl gnupg git python3 make g++ xz-utils file \
             libglib2.0-dev libsecret-1-dev libffi-dev \
             libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
             libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
