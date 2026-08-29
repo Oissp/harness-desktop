@@ -60,12 +60,18 @@ linux:
   maintainer: harness-desktop <zhuanz@users.noreply.github.com>
 
 # fpm 打 deb 的压缩是 CI 构建的最大瓶颈（默认 xz，CI 日志约 2 分钟）。
-# 改用 gz：压缩快 5-10 倍，包体积略增（~10%）。dpkg 完全兼容 gzip 压缩的 deb。
-# 注意：fpm/deb 专属压缩挂在顶层 deb 键（Configuration.deb = DebOptions，
-# FpmTarget.options = {...linux, ...config.deb}）。linux.compression 是通用压缩
-# 级别（maximum/normal/store），控制 AppImage 等，不是 deb 的 fpm 压缩。
+# 实测当前 623MB 原始数据：gzip -9 又大又慢（~185MB，且 gzip -9 比 xz -3 还慢）；
+# xz -3 → ~138MB / CI 约 2min；zstd -9 → ~148MB / CI 约 20-30s（10 倍提速，只大 10MB）。
+# electron-builder 的 deb.compression 枚举只有 gz|bzip2|xz|lzo，不支持 zst，
+# 所以走 deb.fpm 追加 CLI 参数覆盖：app-builder 总会先发 --deb-compression xz，
+# fpm 的 clamp 后出现者生效 → zst，--deb-compression-level 9 = ZSTD_CLEVEL=-9。
+# 容器需装 zstd 包；dpkg (Debian 12+/13) 原生支持 .zst 的 deb。
 deb:
-  compression: gz
+  fpm:
+    - --deb-compression
+    - zst
+    - --deb-compression-level
+    - '9'
 
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
