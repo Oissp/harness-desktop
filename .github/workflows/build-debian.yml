@@ -175,8 +175,9 @@ jobs:
       # 缓存 electron-builder 的下载缓存（electron 42.9.3 zip ≈123MB + fpm/7zip ≈5MB），
       # 容器 HOME 每次 run 都是全新目录，不缓存则每次重下（CI 日志每次都有 downloading 行）。
       # key 只用 electron-builder.yml：electronVersion 与 deb 配置都钉在其中，dsh 版本升级不失效。
+      # v6 跑在 node24（v4 目标 node20 已废弃，CI 日志有 deprecation 警告）；key 不变。
       - name: Cache electron & electron-builder binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
