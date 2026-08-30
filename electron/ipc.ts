@@ -316,31 +316,16 @@ export function registerIpc(
   )
   ipcMain.handle('skill:list', (_e, sessionId: string) => run(() => adapter().listSkills(sessionId)))
 
-  // ---- Part A：会话导出（JSON / Markdown / zip） ----
-  ipcMain.handle('session:export', (_e, sessionId: string, format: 'zip' | 'json' | 'markdown' = 'zip') =>
+  // ---- Part A：会话导出（JSON / Markdown；历史经 adapter 归一化） ----
+  ipcMain.handle('session:export', (_e, sessionId: string, format: 'zip' | 'json' | 'markdown' = 'json') =>
     run(async () => {
       const win = getWindow()
       if (!win) return { saved: false }
       let content: string
-      let ext = 'jsonl'
-      if (format === 'zip') {
-        const port = manager.adapterInstance?.client.port
-        if (!port) throw new Error('dsh 尚未就绪')
-        const res = await fetch(
-          `http://127.0.0.1:${port}/api/session.export?sessionId=${encodeURIComponent(sessionId)}`,
-        )
-        if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`)
-        const buf = Buffer.from(await res.arrayBuffer())
-        const save = await dialog.showSaveDialog(win, {
-          title: '导出会话',
-          defaultPath: `session-${sessionId.slice(-8)}.zip`,
-        })
-        if (save.canceled || !save.filePath) return { saved: false }
-        writeFileSync(save.filePath, buf)
-        return { saved: true, path: save.filePath }
-      }
+      let ext = 'json'
       const history = await adapter().getHistory(sessionId)
-      if (format === 'json') {
+      if (format === 'json' || format === 'zip') {
+        // 旧 session.export 端点已随 alpha.2 移除；zip 回落为 JSON 内容
         content = JSON.stringify({ sessionId, exportedAt: new Date().toISOString(), events: history.events }, null, 2)
         ext = 'json'
       } else {

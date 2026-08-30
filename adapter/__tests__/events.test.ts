@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeSessionEvent, normalizeMuxFrame } from '../events'
+import { normalizeSessionEvent, normalizeControlFrame, normalizeFollowFrame } from '../events'
 import type { DshEvent } from '../events'
 
 const base = { sessionId: 's1', seq: 1, time: 0 }
@@ -115,19 +115,67 @@ describe('adapter/events normalizeSessionEvent', () => {
   })
 })
 
-describe('adapter/events normalizeMuxFrame', () => {
-  it('server-request session/event 帧 → 归一化事件', () => {
+describe('adapter/events normalizeControlFrame', () => {
+  it('baseline 帧 → session-subscribed + title + projection（含 running）', () => {
     const frame = {
-      type: 'server-request',
-      rpcId: 'r1',
-      method: 'session/event',
-      payload: {
-        type: 'session/event',
-        sessionId: 's1',
-        event: { type: 'turn/start', seq: 1, time: 0, data: { turn: 1 } },
+      type: 'baseline',
+      value: {
+        queues: { s1: [{ placement: 'queued' }] },
+        jobs: {},
+        projections: {
+          s1: {
+            asOfSeq: 5,
+            values: { title: '我的会话', agentPreset: 'desktop' },
+          },
+        },
       },
     }
-    const out = normalizeMuxFrame(frame as unknown as Record<string, unknown>)
-    expect(out[0]).toMatchObject({ kind: 'assistant-start' })
+    const out = normalizeControlFrame(frame as unknown as Record<string, unknown>)
+    expect(out).toContainEqual({ kind: 'session-subscribed', sessionId: 's1', lastSeq: 5 })
+    expect(out).toContainEqual({ kind: 'title', sessionId: 's1', seq: 5, title: '我的会话' })
+    expect(out).toContainEqual({ kind: 'projection', sessionId: 's1', seq: 5, key: 'agentPreset', value: 'desktop' })
+    expect(out).toContainEqual({ kind: 'running', sessionId: 's1', running: true })
+  })
+
+  it('queue 帧有 queued/steering → running:true', () => {
+    const out = normalizeControlFrame({
+      type: 'queue',
+      sessionId: 's1',
+      items: [{ placement: 'steering' }],
+    })
+    expect(out).toContainEqual({ kind: 'running', sessionId: 's1', running: true })
+  })
+
+  it('jobs 帧按状态推 running：有 running/stopping → true，否则 false', () => {
+    const busy = normalizeControlFrame({ type: 'jobs', sessionId: 's1', jobs: [{ status: 'running' }] })
+    expect(busy[0]).toMatchObject({ kind: 'running', running: true })
+    const idle = normalizeControlFrame({ type: 'jobs', sessionId: 's1', jobs: [{ status: 'idle' }] })
+    expect(idle[0]).toMatchObject({ kind: 'running', running: false })
+  })
+
+  it('projection 帧 key=title → title 事件', () => {
+    const out = normalizeControlFrame({ type: 'projection', sessionId: 's1', key: 'title', value: '新标题', seq: 7 })
+    expect(out).toContainEqual({ kind: 'title', sessionId: 's1', seq: 7, title: '新标题' })
+  })
+
+  it('未知帧类型 → 空数组', () => {
+    expect(normalizeControlFrame({ type: 'nope' })).toHaveLength(0)
+  })
+})
+
+describe('adapter/events normalizeFollowFrame', () => {
+  it('event 帧 → 归一化聊天事件', () => {
+    const frame = {
+      type: 'event',
+      event: { type: 'turn/start', seq: 3, time: 0, data: { turn: 1 } },
+    }
+    const out = normalizeFollowFrame('s1', frame as unknown as Record<string, unknown>)
+    expect(out[0]).toMatchObject({ kind: 'assistant-start', sessionId: 's1' })
+    expect(out[1]).toMatchObject({ kind: 'running', running: true })
+  })
+
+  it('snapshot 帧（adapter 单独消费为历史）→ 空数组', () => {
+    const out = normalizeFollowFrame('s1', { type: 'snapshot', records: [] })
+    expect(out).toHaveLength(0)
   })
 })

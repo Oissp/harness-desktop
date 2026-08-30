@@ -226,16 +226,17 @@ function createWindow() {
 let loadedEnginePort: number | null = null
 
 /** 把主窗口加载到官方 UI（引擎端口）。端口变化时重新加载；失败定时重试。 */
-function loadEngineUI(port: number) {
+function loadEngineUI(port: number, token: string | null) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (loadedEnginePort === port) return
   loadedEnginePort = port
+  const url = `http://127.0.0.1:${port}/?token=${encodeURIComponent(token ?? '')}`
   let attempt = 0
   const tryLoad = () => {
     // 端口已变（引擎重启换新端口触发 loadEngineUI 新端口）→ 放弃旧端口重试
     if (!mainWindow || mainWindow.isDestroyed()) return
     if (loadedEnginePort !== port) return
-    void mainWindow.loadURL(`http://127.0.0.1:${port}`).catch((err) => {
+    void mainWindow.loadURL(url).catch((err) => {
       console.warn('[harness-desktop] 加载官方 UI 失败:', (err as Error)?.message ?? err)
       if (loadedEnginePort === port) loadedEnginePort = null
       // 递增重试：1s/2s/5s/... 最多 10 次，避免窗口永停回退屏
@@ -347,14 +348,14 @@ app.whenReady().then(async () => {
 
   // 后台启动 dsh，就绪后加载官方 UI（引擎端口），失败不阻塞（保留回退屏）
   void manager.start().then((s) => {
-    if (s.port) loadEngineUI(s.port)
+    if (s.port) loadEngineUI(s.port, manager.token)
   }).catch((err) => {
     console.error('[harness-desktop] dsh 启动失败:', err)
   })
 
   // 端口跟随：引擎崩溃重启换端口 → 窗口重新 loadURL 新端口（A0 端口漂移）
   manager.onStatus((s) => {
-    if (s.port && s.ready) loadEngineUI(s.port)
+    if (s.port && s.ready) loadEngineUI(s.port, manager.token)
     // 崩溃恢复态：引擎已死，窗口回退到本地 React UI（展示恢复页）
     if (s.recovery && !s.ready) {
       loadedEnginePort = null

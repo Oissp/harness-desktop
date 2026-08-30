@@ -8,8 +8,8 @@
  *  - 退出时优雅终止子进程（SIGTERM → SIGKILL）
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { DshAdapter } from '../adapter/index.js'
 import { checkProfile } from './profile-setup.js'
@@ -34,6 +34,20 @@ function resolveDshBin(): string {
     if (existsSync(c)) return c
   }
   throw new Error('无法定位 dsh 引擎（@deepseek-ai/dsh/lib/bin.js）')
+}
+
+/**
+ * 引擎版本（dsh package.json）。alpha.2 移除了 host.describe，版本改由宿主从
+ * 包清单注入（app.getVersion() 是桌面端版本，不是引擎版本）。
+ */
+function resolveEngineVersion(): string | null {
+  try {
+    const pkgRoot = dirname(dirname(resolveDshBin()))
+    const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')) as { version?: string }
+    return typeof pkg.version === 'string' && pkg.version.length > 0 ? pkg.version : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -94,6 +108,8 @@ export class DshManager {
   private recovery = false
   /** 引擎稳定运行计时器（markGood）：就绪后 STABLE_BOOT_MS 提升快照 + 重置崩溃环。 */
   private stableTimer: ReturnType<typeof setTimeout> | null = null
+  /** 启动 URL 携带的认证令牌（`/ ?token=`），用于换取会话 Cookie（alpha.2 强制浏览器认证）。 */
+  private launchToken: string | null = null
   /** 崩溃环检测器。 */
   private crashDetector = new CrashLoopDetector()
   private statusListeners: ((s: DshManagerStatus) => void)[] = []
@@ -112,6 +128,11 @@ export class DshManager {
 
   get home(): string {
     return this.dshHome
+  }
+
+  /** 启动令牌（加载官方 UI 与换 Cookie 用）。 */
+  get token(): string | null {
+    return this.launchToken
   }
 
   /**
@@ -308,12 +329,36 @@ export class DshManager {
   }
 
   private handleStdout(chunk: string) {
-    const match = chunk.match(/http:\/\/127\.0\.0\.1:(\d+)/)
+    // alpha.2：dsh web 启动即打印 `dsh web: http://127.0.0.1:<port>/?token=<token>`
+    const match = chunk.match(/http:\/\/127\.0\.0\.1:(\d+)(?:\/\?token=([A-Za-z0-9_-]+))?/)
     if (match && !this.adapter) {
       const port = Number(match[1])
-      this.adapter = new DshAdapter(port)
+      this.launchToken = match[2] ?? null
+      const adapter = new DshAdapter(port)
+      // host.describe 在 alpha.2 已移除，版本由宿主从 dsh package.json 注入
+      adapter.setVersion(resolveEngineVersion())
+      this.adapter = adapter
       // 事件订阅补接：adapter 刚创建，把排队/已有订阅者接上（修复订阅竞态）
       this.rebindEventListeners()
+      // alpha.2：强制浏览器认证。用启动令牌换取会话 Cookie，
+      // 成功前 isReady()（probeReady）恒为 false → waitUntilReady 挂起等待。
+      if (this.launchToken) {
+        void this.establishAuth(adapter, this.launchToken)
+      }
+    }
+  }
+
+  /** 用启动令牌换取会话 Cookie（并发于 waitUntilReady 轮询，同样以就绪超时为界）。 */
+  private async establishAuth(adapter: DshAdapter, token: string): Promise<void> {
+    const deadline = Date.now() + READY_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      if (this.adapter !== adapter || this.stopping) return
+      try {
+        if (await adapter.client.exchangeToken(token)) return
+      } catch {
+        // 引擎可能尚未就绪，继续重试
+      }
+      await sleep(500)
     }
   }
 

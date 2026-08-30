@@ -1,6 +1,10 @@
 /**
- * adapter/events.ts —— 把 dsh 的 SessionEvent / MuxFrame 归一化为稳定的
+ * adapter/events.ts —— 把 dsh 的 SessionEvent / remote.mux 帧归一化为稳定的
  * SessionStreamEvent 词汇。dsh 改事件名/字段时只需改这里。
+ *
+ * alpha.2 帧来源：
+ *  - session/control 流：baseline / queue / jobs / projection 帧（全局会话状态）
+ *  - session/follow 流：首帧 snapshot（历史）之后是 event 帧（实时聊天事件）
  */
 import type { MessageBlock, SessionStreamEvent } from '../shared/types.js'
 
@@ -213,43 +217,78 @@ export function normalizeSessionEvent(
   return out
 }
 
-/** 归一化一条 mux 帧（WS 推送的 server-request 信封）。 */
-export function normalizeMuxFrame(frame: Record<string, unknown>): SessionStreamEvent[] {
-  const method = frame.method
-  const payload = (frame.payload ?? {}) as Record<string, unknown>
-  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : ''
-
-  switch (method) {
-    case 'session/event': {
-      const event = payload.event as DshEvent | undefined
-      if (!event || typeof event.type !== 'string') return []
-      return normalizeSessionEvent(sessionId, event)
+/** 归一化一条 session/control 流帧（全局会话状态）→ 稳定事件。 */
+export function normalizeControlFrame(frame: Record<string, unknown>): SessionStreamEvent[] {
+  const out: SessionStreamEvent[] = []
+  switch (frame.type) {
+    case 'baseline': {
+      const value = (frame.value ?? {}) as {
+        queues?: Record<string, Array<{ placement?: string }>>
+        jobs?: Record<string, Array<{ status?: string }>>
+        projections?: Record<string, { asOfSeq?: number; values?: Record<string, unknown> }>
+      }
+      const projections = value.projections ?? {}
+      for (const [agentId, proj] of Object.entries(projections)) {
+        if (!proj) continue
+        const seq = Number(proj.asOfSeq ?? -1)
+        out.push({ kind: 'session-subscribed', sessionId: agentId, lastSeq: seq })
+        const values = proj.values ?? {}
+        if (typeof values.title === 'string' && values.title) {
+          out.push({ kind: 'title', sessionId: agentId, seq, title: values.title })
+        }
+        for (const [key, v] of Object.entries(values)) {
+          out.push({ kind: 'projection', sessionId: agentId, seq, key, value: v })
+        }
+        const busy =
+          (value.queues?.[agentId] ?? []).some((it) => it.placement === 'queued' || it.placement === 'steering') ||
+          (value.jobs?.[agentId] ?? []).some((j) => j.status === 'running' || j.status === 'stopping')
+        if (busy) out.push({ kind: 'running', sessionId: agentId, running: true })
+      }
+      break
     }
-    case 'session/subscribed': {
-      return [{ kind: 'session-subscribed', sessionId, lastSeq: Number(payload.lastSeq ?? -1) }]
+    case 'queue': {
+      const sessionId = String(frame.sessionId ?? '')
+      const items = (frame.items ?? []) as Array<{ placement?: string }>
+      if (sessionId && items.some((it) => it.placement === 'queued' || it.placement === 'steering')) {
+        out.push({ kind: 'running', sessionId, running: true })
+      }
+      break
     }
-    case 'session/projection': {
-      return [
-        {
-          kind: 'projection',
-          sessionId,
-          seq: Number(payload.seq ?? -1),
-          key: String(payload.key ?? ''),
-          value: payload.value,
-        },
-      ]
+    case 'jobs': {
+      const sessionId = String(frame.sessionId ?? '')
+      const jobs = (frame.jobs ?? []) as Array<{ status?: string }>
+      if (sessionId) {
+        out.push({ kind: 'running', sessionId, running: jobs.some((j) => j.status === 'running' || j.status === 'stopping') })
+      }
+      break
     }
-    case 'session/title': {
-      const data = (payload.data ?? {}) as Record<string, unknown>
-      const title = typeof data.title === 'string' ? data.title : ''
-      return [{ kind: 'title', sessionId, seq: Number(payload.seq ?? -1), title }]
+    case 'projection': {
+      const sessionId = String(frame.sessionId ?? '')
+      const key = String(frame.key ?? '')
+      const seq = Number(frame.seq ?? -1)
+      out.push({ kind: 'projection', sessionId, seq, key, value: frame.value })
+      if (key === 'title' && typeof frame.value === 'string') {
+        out.push({ kind: 'title', sessionId, seq, title: frame.value })
+      }
+      break
     }
     default:
-      return []
+      break
   }
+  return out
 }
 
-/** 归一化 session.history 的一页历史。 */
+/** 归一化一条 session/follow 流帧（实时聊天事件）。snapshot 由 adapter 单独消费（历史）。 */
+export function normalizeFollowFrame(sessionId: string, frame: Record<string, unknown>): SessionStreamEvent[] {
+  if (frame.type === 'event') {
+    const event = frame.event as DshEvent | undefined
+    if (!event || typeof event.type !== 'string') return []
+    return normalizeSessionEvent(sessionId, event)
+  }
+  return []
+}
+
+/** 归一化 session.follow snapshot / session.page 的一页历史。 */
 export function normalizeHistory(events: unknown[]): SessionStreamEvent[] {
   const out: SessionStreamEvent[] = []
   for (const entry of events) {

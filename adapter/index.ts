@@ -4,8 +4,8 @@
  * 主进程通过这个类访问 dsh 的全部能力。dsh 上游变更只会影响
  * DshClient（dsh-client.ts）与 normalize*（events.ts），本文件尽量薄。
  */
-import { DshClient } from './dsh-client.js'
-import { normalizeHistory, normalizeMuxFrame } from './events.js'
+import { DshClient, type RemoteStream } from './dsh-client.js'
+import { normalizeControlFrame, normalizeFollowFrame, normalizeHistory } from './events.js'
 import type { DshEvent } from './events.js'
 import type {
   AgentPresetInfo,
@@ -28,26 +28,37 @@ function envRefFor(providerId: string): string {
   return `${base || 'CUSTOM'}_API_KEY`
 }
 
+function dispatch(listeners: ((evt: SessionStreamEvent) => void)[], evt: SessionStreamEvent) {
+  for (const listener of [...listeners]) listener(evt)
+}
+
 export class DshAdapter {
   readonly client: DshClient
-  private muxUnsub: (() => void) | null = null
+  /** 全局 session/control 流（会话列表状态）。 */
+  private control: RemoteStream | null = null
+  /** 已打开的 session/follow 流（sessionId → stream），为聊天视图提供实时事件。 */
+  private follows = new Map<string, RemoteStream>()
   private eventListeners: ((evt: SessionStreamEvent) => void)[] = []
 
   constructor(port: number) {
     this.client = new DshClient(port)
   }
 
+  /** 注入引擎版本（dsh package.json），describe 用。 */
+  setVersion(version: string | null) {
+    this.client.setVersion(version)
+  }
+
   // ---- 生命周期 ----
 
-  /** 就绪探测：host.describe 返回 ok 即视为就绪。 */
+  /** 就绪探测：认证完成 + 一次认证请求成功即视为就绪。 */
   async isReady(): Promise<boolean> {
-    const probe = await this.client.probeDescribe()
-    return probe !== null
+    return this.client.probeReady()
   }
 
   describe(): Promise<{
-    version: string
-    cwd: string
+    version: string | null
+    cwd: string | null
     provider?: string
     model?: string
     attachedSessions: number
@@ -59,12 +70,7 @@ export class DshAdapter {
   // ---- 会话 ----
 
   async listSessions(): Promise<SessionSummary[]> {
-    const [sessionRes, workspaceRes] = await Promise.all([
-      this.client.listSessions(),
-      this.client.workspaceList().catch(() => ({ items: [], archivedSessionIds: [] })),
-    ])
-    const archived = new Set(workspaceRes.archivedSessionIds ?? [])
-    const { items } = sessionRes
+    const { items } = await this.client.listSessions()
     // 去重：引擎可能因订阅/列表竞态返回重复 sessionId
     const seen = new Set<string>()
     return items
@@ -72,12 +78,13 @@ export class DshAdapter {
         const id = String((raw as Record<string, unknown>).sessionId ?? '')
         if (!id || seen.has(id)) return false
         seen.add(id)
-        return !archived.has(id)
+        return true
       })
       .map((raw) => {
         const s = raw as Record<string, unknown>
-        // title projection 的值是字符串（或 null）；兼容旧形态 { value }
-        const projTitle = (s.projections as { values?: { title?: unknown } } | undefined)?.values?.title
+        // title / agentPreset 在 projections.values 里（值可能为 null 或字符串）
+        const proj = (s.projections as { values?: Record<string, unknown> } | undefined)?.values
+        const projTitle = proj?.title
         const resolvedTitle =
           typeof projTitle === 'string'
             ? projTitle
@@ -85,7 +92,10 @@ export class DshAdapter {
               ? (projTitle as { value?: unknown }).value
               : undefined
         const title = typeof resolvedTitle === 'string' ? resolvedTitle : (s.title as string)
-        const planProj = (s.projections as { values?: { plan?: { active?: boolean } } } | undefined)?.values?.plan
+        const agentPreset = typeof proj?.agentPreset === 'string' ? proj.agentPreset : undefined
+        // 计划模式：goal 投影存在且未 complete（对应旧 projections.plan.active）
+        const goal = proj?.goal as { goal?: { phase?: string } } | null | undefined
+        const planActive = goal != null && goal.goal != null && goal.goal.phase !== 'complete'
         return {
           sessionId: String(s.sessionId ?? ''),
           title: title || '新会话',
@@ -93,8 +103,8 @@ export class DshAdapter {
           running: Boolean(s.running),
           blank: Boolean(s.blank),
           cwd: typeof s.cwd === 'string' ? s.cwd : undefined,
-          agentPreset: typeof s.agentPreset === 'string' ? s.agentPreset : undefined,
-          planActive: Boolean(planProj?.active),
+          agentPreset,
+          planActive,
         }
       })
   }
@@ -106,9 +116,37 @@ export class DshAdapter {
     return this.client.createSession(payload)
   }
 
+  /**
+   * 拉取历史 + 建立该会话的实时事件流。
+   * 通过 session/follow 流：首帧 snapshot 即完整历史，其后 event 帧持续推送实时事件。
+   */
   async getHistory(sessionId: string): Promise<{ events: SessionStreamEvent[]; hasMore: boolean }> {
-    const { events, hasMore } = await this.client.history({ sessionId })
-    return { events: normalizeHistory(events), hasMore }
+    const prev = this.follows.get(sessionId)
+    if (prev) {
+      prev.onItem = null
+      this.client.muxCancel(prev)
+      this.follows.delete(sessionId)
+    }
+    const stream = this.client.followSession(sessionId)
+    this.follows.set(sessionId, stream)
+    const first = (await stream.first()) as Record<string, unknown> | null | undefined
+    // snapshot 之后的事件才推给监听器（snapshot 已作为历史返回）
+    stream.onItem = (value) => {
+      for (const evt of normalizeFollowFrame(sessionId, value as Record<string, unknown>)) {
+        dispatch(this.eventListeners, evt)
+      }
+    }
+    if (first && first.type === 'snapshot') {
+      return {
+        events: normalizeHistory((first.records as unknown[] | undefined) ?? []),
+        hasMore: Boolean((first as { hasMore?: boolean }).hasMore),
+      }
+    }
+    // 极端情况：首帧不是 snapshot（如会话无历史）——把它当实时事件分发
+    if (first) {
+      stream.onItem(first)
+    }
+    return { events: [], hasMore: false }
   }
 
   async sendMessage(sessionId: string, text: string, files?: PickedFile[]): Promise<{ accepted: boolean }> {
@@ -183,40 +221,32 @@ export class DshAdapter {
     })
   }
 
-  selectAgentPreset(sessionId: string, agentPreset: string): Promise<{ agentPreset: string }> {
-    return this.client.agentPresetSelect({ sessionId, agentPreset })
+  async selectAgentPreset(sessionId: string, agentPreset: string): Promise<{ agentPreset: string }> {
+    const selected = await this.client.agentPresetSelect({ sessionId, agentPreset })
+    return { agentPreset: String(selected ?? agentPreset) }
   }
 
   // ---- 模型 ----
 
   async listModels(): Promise<ModelGroup[]> {
-    const { groups } = await this.client.llmModels()
-    return (groups ?? []).map((g) => {
-      const grp = g as Record<string, unknown>
-      return {
-        id: String(grp.id ?? ''),
-        name: String(grp.name ?? grp.id ?? ''),
-        models: ((grp.models as unknown[]) ?? []).map((m) => {
-          const model = m as Record<string, unknown>
-          return {
-            id: String(model.id ?? ''),
-            name: String(model.name ?? model.id ?? ''),
-            description: typeof model.description === 'string' ? model.description : undefined,
-          }
-        }),
-      }
-    })
+    const { groups } = await this.client.modelCatalog()
+    return (groups ?? []).map((g) => ({
+      id: String(g.id ?? ''),
+      name: String(g.name ?? g.id ?? ''),
+      models: ((g.models as unknown[]) ?? []).map((m) => {
+        const model = m as Record<string, unknown>
+        return {
+          id: String(model.id ?? ''),
+          name: String(model.name ?? model.id ?? ''),
+          description: typeof model.description === 'string' ? model.description : undefined,
+        }
+      }),
+    }))
   }
 
   async listProviders(): Promise<ProviderInfo[]> {
-    const { providers } = await this.client.llmProviders()
-    return (providers ?? []).map((p) => {
-      const prov = p as Record<string, unknown>
-      return {
-        id: String(prov.id ?? prov.provider ?? ''),
-        name: String(prov.name ?? prov.id ?? prov.provider ?? ''),
-      }
-    })
+    const { routableProviders } = await this.client.modelCatalog()
+    return (routableProviders ?? []).map((id) => ({ id: String(id), name: String(id) }))
   }
 
   selectModel(sessionId: string, provider: string, model: string): Promise<unknown> {
@@ -239,7 +269,7 @@ export class DshAdapter {
 
   // ---- Part A：凭证统一管理 ----
 
-  /** 枚举全部凭据 ref 及配置状态（来自 llm-deepseek / llm-pi-ai / web-search 命名空间）。 */
+  /** 枚举全部凭据 ref 及配置状态（来自 settings.describe 的命名空间）。 */
   async listCredentials(): Promise<CredentialStatus[]> {
     const describe = await this.client.settingsDescribe()
     const refs: Array<{ ref: string; label: string; priority: number }> = []
@@ -298,7 +328,7 @@ export class DshAdapter {
   }
 
   async setWebSearchConfig(config: Partial<WebSearchConfig>): Promise<WebSearchConfig> {
-    await this.client.settingsUpdate({ ns: 'web-search-deepseek', patch: config })
+    await this.client.settingsUpdate({ ns: 'web-search-deepseek', patch: config as Record<string, unknown> })
     return this.getWebSearchConfig()
   }
 
@@ -313,7 +343,7 @@ export class DshAdapter {
   }
 
   pickDirectory(): Promise<{ path: string | null }> {
-    return this.client.pickDirectory()
+    return this.client.pickDirectory().then((path) => ({ path }))
   }
 
   // ---- 自定义 provider（llm-pi-ai） ----
@@ -323,15 +353,10 @@ export class DshAdapter {
     const describe = await this.client.settingsDescribe()
     const ns = describe.namespaces.find((n) => n.ns === 'llm-pi-ai')
     const providers = (ns?.value?.providers ?? {}) as Record<string, Record<string, unknown>>
-    const entries = Object.entries(providers)
-    // 查询活跃状态
-    const { providers: providerViews } = await this.client.llmProviders()
-    const activeById = new Map<string, boolean>()
-    for (const view of providerViews) {
-      const v = view as Record<string, unknown>
-      activeById.set(String(v.provider), Boolean(v.active))
-    }
-    return entries.map(([id, cfg]) => ({
+    // 活跃状态：provider 出现在 modelCatalog.routableProviders 即视为可用
+    const catalog = await this.client.modelCatalog().catch(() => null)
+    const activeIds = new Set(catalog?.routableProviders ?? [])
+    return Object.entries(providers).map(([id, cfg]) => ({
       id,
       displayName: String(cfg.displayName ?? id),
       apiKeyEnv: typeof cfg.apiKeyEnv === 'string' ? cfg.apiKeyEnv : undefined,
@@ -346,7 +371,7 @@ export class DshAdapter {
             }
           })
         : [],
-      active: activeById.get(id) ?? false,
+      active: activeIds.has(id),
     }))
   }
 
@@ -387,12 +412,14 @@ export class DshAdapter {
 
   onSessionEvent(cb: (evt: SessionStreamEvent) => void): () => void {
     this.eventListeners.push(cb)
-    if (this.muxUnsub === null) {
-      this.muxUnsub = this.client.subscribeMux((frame) => {
-        for (const evt of normalizeMuxFrame(frame)) {
-          for (const listener of [...this.eventListeners]) listener(evt)
+    if (this.control === null) {
+      const stream = this.client.openStream('session/control', {})
+      this.control = stream
+      stream.onItem = (value) => {
+        for (const evt of normalizeControlFrame(value as Record<string, unknown>)) {
+          dispatch(this.eventListeners, evt)
         }
-      })
+      }
     }
     return () => {
       this.eventListeners = this.eventListeners.filter((l) => l !== cb)
@@ -400,8 +427,16 @@ export class DshAdapter {
   }
 
   close() {
-    this.muxUnsub?.()
-    this.muxUnsub = null
+    if (this.control) {
+      this.control.onItem = null
+      this.client.muxCancel(this.control)
+      this.control = null
+    }
+    for (const stream of this.follows.values()) {
+      stream.onItem = null
+      this.client.muxCancel(stream)
+    }
+    this.follows.clear()
     this.eventListeners = []
     this.client.close()
   }
