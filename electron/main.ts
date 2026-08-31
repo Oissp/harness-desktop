@@ -36,6 +36,10 @@ autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.allowPrerelease = true
 autoUpdater.channel = 'alpha'
 
+// 托盘菜单"检查更新"复用的统一触发入口（setupUpdater 里赋值）。
+// 托盘与 IPC 都走它，保证 disabled/超时/通知逻辑一致。
+let triggerManualUpdateCheck: () => void = () => {}
+
 function setupUpdater() {
   // updater 是否活跃：仅打包 + 已签名（macOS）/ 正常 Linux 构建时为 true。
   // dev 模式与未签名构建下为 false —— 此时仍注册 IPC handler（返回 active=false
@@ -57,27 +61,48 @@ function setupUpdater() {
       manualCheckTimer = null
     }
   }
+  // 手动触发标志：区分托盘/按钮手动检查与后台定时复检。仅手动检查下发系统通知，
+  // 后台复检保持静默（避免每 6h 弹通知打扰）。
+  let manualCheck = false
+
+  const notifyUpdate = (body: string) => {
+    try {
+      new Notification({ title: 'DSH Desktop', body }).show()
+    } catch {
+      // 通知失败不阻塞
+    }
+  }
+
+  // 统一的手动检查入口：托盘菜单与 IPC update:check 都走这里。
+  // !active 时直接通知 + 下发 disabled 状态（不挂超时、不调 autoUpdater）。
+  const doManualCheck = () => {
+    if (!active) {
+      const msg = app.isPackaged ? '当前为未签名构建，自动更新不可用' : '开发模式下无法检查更新'
+      mainWindow?.webContents.send('update:status', { state: 'disabled', message: msg })
+      notifyUpdate(msg)
+      return
+    }
+    manualCheck = true
+    clearManualTimer()
+    manualCheckTimer = setTimeout(() => {
+      manualCheckTimer = null
+      mainWindow?.webContents.send('update:status', {
+        state: 'error',
+        message: '检查更新超时，请稍后重试或检查网络后重试',
+      })
+      if (manualCheck) {
+        manualCheck = false
+        notifyUpdate('检查更新超时，请稍后重试')
+      }
+    }, MANUAL_CHECK_TIMEOUT)
+    void autoUpdater.checkForUpdates()
+  }
+  triggerManualUpdateCheck = doManualCheck
 
   ipcMain.handle('update:check', () => {
     try {
-      if (!active) {
-        mainWindow?.webContents.send('update:status', {
-          state: 'disabled',
-          message: app.isPackaged ? '当前为未签名构建，自动更新不可用' : '开发模式下无法检查更新',
-        })
-        return { ok: true, value: { active: false } }
-      }
-      // 挂超时兜底：到达终态（available/up-to-date/error）的任一事件时由下方监听清除
-      clearManualTimer()
-      manualCheckTimer = setTimeout(() => {
-        manualCheckTimer = null
-        mainWindow?.webContents.send('update:status', {
-          state: 'error',
-          message: '检查更新超时，请稍后重试或检查网络后重试',
-        })
-      }, MANUAL_CHECK_TIMEOUT)
-      void autoUpdater.checkForUpdates()
-      return { ok: true, value: { active: true } }
+      doManualCheck()
+      return { ok: true, value: { active } }
     } catch (err) {
       clearManualTimer()
       return { ok: false, error: { code: 'update-error', message: (err as Error).message } }
@@ -94,22 +119,27 @@ function setupUpdater() {
   // updater 不活跃时到此为止：不注册事件监听、不启动定时复检
   if (!active) return
 
-  // 收到任一"有结果"事件即清除手动检查超时定时器
-  const maybeClearManualTimer = (state: string) => {
+  // 收到任一"有结果"事件即清除手动检查超时定时器；手动触发时额外发系统通知
+  // （引擎 UI 状态下窗口无 onUpdateStatus 监听器，通知是唯一可见反馈）。
+  const onResult = (state: string, notifyBody?: string) => {
     if (state === 'available' || state === 'up-to-date' || state === 'error' || state === 'downloaded') {
       clearManualTimer()
+    }
+    if (manualCheck && notifyBody) {
+      manualCheck = false
+      notifyUpdate(notifyBody)
     }
   }
   autoUpdater.on('checking-for-update', () => {
     mainWindow?.webContents.send('update:status', { state: 'checking' })
   })
   autoUpdater.on('update-available', (info) => {
-    maybeClearManualTimer('available')
+    onResult('available', `发现新版本 v${info.version}，正在后台下载…`)
     mainWindow?.webContents.send('update:status', { state: 'available', version: info.version })
     // 后台自动下载（autoDownload=true）
   })
   autoUpdater.on('update-not-available', () => {
-    maybeClearManualTimer('up-to-date')
+    onResult('up-to-date', '已是最新版本')
     mainWindow?.webContents.send('update:status', { state: 'up-to-date' })
   })
   autoUpdater.on('download-progress', (p) => {
@@ -119,16 +149,13 @@ function setupUpdater() {
     })
   })
   autoUpdater.on('update-downloaded', (info) => {
-    maybeClearManualTimer('downloaded')
+    // downloaded 是重要状态：无论手动/后台都通知（重启提示）
+    onResult('downloaded')
     mainWindow?.webContents.send('update:status', { state: 'downloaded', version: info.version })
-    try {
-      new Notification({ title: 'DSH Desktop', body: `新版本 ${info.version} 已下载，重启应用完成更新。` }).show()
-    } catch {
-      // 通知失败不阻塞
-    }
+    notifyUpdate(`新版本 ${info.version} 已下载，重启应用完成更新。`)
   })
   autoUpdater.on('error', (err) => {
-    maybeClearManualTimer('error')
+    onResult('error', `检查更新失败：${(err as Error)?.message ?? '未知错误'}`)
     // 失败静默（日志记录，不打扰用户）
     console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
     mainWindow?.webContents.send('update:status', { state: 'error', message: err?.message })
@@ -195,13 +222,7 @@ function createTray() {
     },
     {
       label: '检查更新',
-      click: () => {
-        try {
-          void autoUpdater.checkForUpdates()
-        } catch (err) {
-          console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
-        }
-      },
+      click: () => triggerManualUpdateCheck(),
     },
     { type: 'separator' },
     { label: '退出', click: () => shutdown() },
@@ -244,6 +265,12 @@ function createWindow() {
       sandbox: false,
       webSecurity: true,
     },
+  })
+
+  // 引擎 UI 页面 <title>（如 "DeepSeek Harness"）会触发 page-title-updated
+  // 覆盖窗口标题。这里拦截，强制保持 "DSH Desktop"，使任务栏/标题栏品牌一致。
+  mainWindow.on('page-title-updated', (e) => {
+    e.preventDefault()
   })
 
   mainWindow.on('closed', () => {
