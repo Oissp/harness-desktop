@@ -1,10 +1,10 @@
 {
-  "name": "harness-desktop",
-  "version": "1.0.0",
+  "name": "dsh-desktop",
+  "version": "1.0.1",
   "description": "Desktop Client for DeepSeek Harness",
   "main": "dist-electron/electron/main.js",
   "type": "module",
-  "author": "harness-desktop",
+  "author": "Oissp <19642615+Oissp@users.noreply.github.com>",
   "license": "MIT",
   "homepage": "https://github.com/Oissp/harness-desktop",
   "private": true,

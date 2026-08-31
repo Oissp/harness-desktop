@@ -110,6 +110,8 @@ export class DshManager {
   private stableTimer: ReturnType<typeof setTimeout> | null = null
   /** 启动 URL 携带的认证令牌（`/ ?token=`），用于换取会话 Cookie（alpha.2 强制浏览器认证）。 */
   private launchToken: string | null = null
+  /** stdout 行缓冲：端口 URL 可能跨 chunk 分片，按行拼接后再匹配。 */
+  private stdoutBuf = ''
   /** 崩溃环检测器。 */
   private crashDetector = new CrashLoopDetector()
   private statusListeners: ((s: DshManagerStatus) => void)[] = []
@@ -140,6 +142,13 @@ export class DshManager {
    * @returns 解除订阅函数。
    */
   subscribeEvents(cb: (evt: SessionStreamEvent) => void): () => void {
+    // 按 cb 身份幂等：同一回调重复订阅不叠加。
+    // 修复 StrictMode 双挂载 / renderer 重载导致的累积订阅（事件双发、流式 delta 重复）。
+    if (this.eventListeners.includes(cb)) {
+      return () => {
+        this.eventListeners = this.eventListeners.filter((l) => l !== cb)
+      }
+    }
     this.eventListeners.push(cb)
     if (this.adapter) {
       this.eventUnsubs.push(this.adapter.onSessionEvent(cb))
@@ -278,6 +287,8 @@ export class DshManager {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     this.proc = child
+    // 重置行缓冲，避免上一次进程的残留 stdout 串入本次端口解析
+    this.stdoutBuf = ''
 
     child.stdout?.on('data', (chunk: Buffer) => this.handleStdout(String(chunk)))
     child.stderr?.on('data', (chunk: Buffer) => this.handleStderr(String(chunk)))
@@ -329,21 +340,29 @@ export class DshManager {
   }
 
   private handleStdout(chunk: string) {
-    // alpha.2：dsh web 启动即打印 `dsh web: http://127.0.0.1:<port>/?token=<token>`
-    const match = chunk.match(/http:\/\/127\.0\.0\.1:(\d+)(?:\/\?token=([A-Za-z0-9_-]+))?/)
-    if (match && !this.adapter) {
-      const port = Number(match[1])
-      this.launchToken = match[2] ?? null
-      const adapter = new DshAdapter(port)
-      // host.describe 在 alpha.2 已移除，版本由宿主从 dsh package.json 注入
-      adapter.setVersion(resolveEngineVersion())
-      this.adapter = adapter
-      // 事件订阅补接：adapter 刚创建，把排队/已有订阅者接上（修复订阅竞态）
-      this.rebindEventListeners()
-      // alpha.2：强制浏览器认证。用启动令牌换取会话 Cookie，
-      // 成功前 isReady()（probeReady）恒为 false → waitUntilReady 挂起等待。
-      if (this.launchToken) {
-        void this.establishAuth(adapter, this.launchToken)
+    // 按行缓冲再匹配：慢管道/高负载下端口 URL 可能跨 chunk 分片，
+    // 逐 chunk 正则会漏匹配 → adapter 不创建 → 90s 后误报"dsh 启动超时"。
+    this.stdoutBuf += chunk
+    const lines = this.stdoutBuf.split('\n')
+    // 末段可能是不完整行，留到下次拼接
+    this.stdoutBuf = lines.pop() ?? ''
+    for (const line of lines) {
+      // alpha.2：dsh web 启动即打印 `dsh web: http://127.0.0.1:<port>/?token=<token>`
+      const match = line.match(/http:\/\/127\.0\.0\.1:(\d+)(?:\/\?token=([A-Za-z0-9_-]+))?/)
+      if (match && !this.adapter) {
+        const port = Number(match[1])
+        this.launchToken = match[2] ?? null
+        const adapter = new DshAdapter(port)
+        // host.describe 在 alpha.2 已移除，版本由宿主从 dsh package.json 注入
+        adapter.setVersion(resolveEngineVersion())
+        this.adapter = adapter
+        // 事件订阅补接：adapter 刚创建，把排队/已有订阅者接上（修复订阅竞态）
+        this.rebindEventListeners()
+        // alpha.2：强制浏览器认证。用启动令牌换取会话 Cookie，
+        // 成功前 isReady()（probeReady）恒为 false → waitUntilReady 挂起等待。
+        if (this.launchToken) {
+          void this.establishAuth(adapter, this.launchToken)
+        }
       }
     }
   }
@@ -363,8 +382,13 @@ export class DshManager {
   }
 
   private handleStderr(chunk: string) {
+    // 只记录错误级行，避免无害警告顶掉真实错误使 status.error 失真。
     const line = chunk.trim()
-    if (line) this.lastError = line.slice(0, 300)
+    if (!line) return
+    // dsh/stderr 误告警特征：deprecation、warning、experimental、(node:pid) 等
+    if (/error|fatal|panic|unhandled|throw|EADDR|EACCES|ENOENT|ECONN/i.test(line)) {
+      this.lastError = line.slice(0, 300)
+    }
   }
 
   private async waitUntilReady(): Promise<DshManagerStatus> {

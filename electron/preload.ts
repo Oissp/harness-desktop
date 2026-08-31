@@ -225,11 +225,11 @@ function injectDesktopBrand() {
       brandWhaleSvg(56, 'hd-hero-grad') +
       '<span data-hd-hero-title style="font:700 30px/1.2 -apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;color:' +
       primary +
-      ';letter-spacing:.3px">DSH Desktop<span ' +
+      ';letter-spacing:.3px">DSH Desktop <span ' +
       ver.dataAttr +
       ' style="' +
       ver.style +
-      '>v1.0.0</span></span>' +
+      '>v1.0.1</span></span>' +
       '<span data-hd-hero-sub style="font:400 14px/1.5 -apple-system,&quot;Segoe UI&quot;,Roboto,sans-serif;color:' +
       secondary +
       '">你的 AI 工作台 · 开始对话</span>'
@@ -237,10 +237,10 @@ function injectDesktopBrand() {
   }
 
   const applyVersion = () => {
-    // hero 版本徽标用 getVersion 填充（默认 v1.0.0）
+    // hero 版本徽标用 getVersion 填充（默认 v1.0.1）
     void desktop.getVersion().then((v) => {
       const heroVer = document.querySelector('[data-hd-hero-ver]')
-      if (heroVer) heroVer.textContent = 'v' + (v || '1.0.0')
+      if (heroVer) heroVer.textContent = 'v' + (v || '1.0.1')
     })
   }
 

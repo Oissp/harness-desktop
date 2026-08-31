@@ -93,7 +93,7 @@ export default function Wizard({ dshReady, onComplete, onSkip }: Props) {
       <div className="wizard-card">
         <div className="wizard-header">
           <WhaleLogo className="wizard-logo" />
-          <h1>欢迎使用 harness-desktop</h1>
+          <h1>欢迎使用 DSH Desktop</h1>
           <p>装完即用的 AI 助手工作台</p>
         </div>
 
@@ -113,7 +113,7 @@ export default function Wizard({ dshReady, onComplete, onSkip }: Props) {
                 <div className="wizard-step">
                   <h2>开始吧</h2>
                   <p className="subtitle">
-                    harness-desktop 内置 DeepSeek Harness 引擎：聊天、读文件、写代码、执行命令，一个窗口全搞定。
+                    DSH Desktop 内置 DeepSeek Harness 引擎：聊天、读文件、写代码、执行命令，一个窗口全搞定。
                     <br />
                     只需三步：配置 API Key → 选择工作区 → 开始对话。
                   </p>

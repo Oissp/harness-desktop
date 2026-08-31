@@ -355,9 +355,24 @@ export function registerIpc(
     run(async () => {
       const apiKey = String(key ?? '').trim()
       if (!apiKey) throw new Error('请输入 API Key')
-      const res = await fetch('https://api.deepseek.com/models', {
-        headers: { authorization: `Bearer ${apiKey}` },
-      })
+      // 加超时：网络挂起时不能让 IPC 永久阻塞、UI 无响应
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 15_000)
+      let res: Response
+      try {
+        res = await fetch('https://api.deepseek.com/models', {
+          headers: { authorization: `Bearer ${apiKey}` },
+          signal: ctrl.signal,
+        })
+      } catch (err) {
+        throw new Error(
+          ctrl.signal.aborted
+            ? '验证超时（15s），请检查网络后重试'
+            : `验证请求失败：${(err as Error).message}`,
+        )
+      } finally {
+        clearTimeout(timer)
+      }
       if (!res.ok) {
         const body = await res.text().catch(() => '')
         throw new Error(`Key 无效：HTTP ${res.status} ${body.slice(0, 120)}`)
@@ -395,16 +410,15 @@ export function registerIpc(
     getWindow()?.webContents.send('dsh:status', s)
   }
   const unsubStatus = manager.onStatus(onStatus)
-
-  // 可靠事件订阅：adapter 未就绪时排队，创建/重建后自动接入（修复订阅竞态 + 端口漂移）
-  ipcMain.handle('dsh:subscribe', () => {
-    manager.subscribeEvents(onEvent)
-    return ok(true)
-  })
+  // subscribeEvents 按 cb 身份幂等：renderer StrictMode 双挂载 / 重载不会叠加订阅。
+  // 仍保留 unsub 以便窗口卸载时彻底清理主进程侧监听。
+  const unsubEvents = manager.subscribeEvents(onEvent)
+  ipcMain.handle('dsh:subscribe', () => ok(true))
 
   // 预加载时调用，确保退出时清理
   return () => {
     manager.adapterInstance?.close()
+    unsubEvents()
     unsubStatus()
     reminders.stop()
   }

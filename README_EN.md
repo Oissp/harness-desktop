@@ -26,7 +26,7 @@
 
 ```bash
 # download the latest .deb, then:
-sudo dpkg -i harness-desktop_*.deb
+sudo dpkg -i dsh-desktop_*.deb
 ```
 
 **First run**: Run → 4-step wizard (welcome → API Key → workspace → done) → start chatting.
