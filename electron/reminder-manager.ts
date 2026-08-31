@@ -105,12 +105,25 @@ export class ReminderManager {
     for (const r of reminders) {
       if (r.nextAt > now) {
         remaining.push(r)
-      } else if (r.kind === 'every' && r.everySeconds) {
-        remaining.push({ ...r, nextAt: now + r.everySeconds * 1000 })
-      } else if (r.kind === 'daily') {
-        remaining.push({ ...r, nextAt: nextDaily(r.dailyTime ?? '09:00', now) })
-      } else if (r.kind === 'weekly') {
-        remaining.push({ ...r, nextAt: nextWeekly(r.weeklyDay ?? 0, r.dailyTime ?? '09:00', now) })
+        continue
+      }
+      const isPeriodic = r.kind === 'every' || r.kind === 'daily' || r.kind === 'weekly'
+      if (isPeriodic) {
+        // 周期提醒：连续失败（如目标会话已被删）不能无限重排——否则会永久空转、
+        // 且用户毫无感知。连续失败达上限即丢弃并告警，与一次性提醒的重试上限对齐。
+        const ok = firedOk.includes(r.id)
+        const failures = ok ? 0 : (r.consecutiveFailures ?? 0) + 1
+        if (!ok && failures > MAX_RETRIES) {
+          console.warn(`[harness-desktop] 周期提醒 ${r.id} 连续失败 ${MAX_RETRIES} 次，丢弃`)
+          continue
+        }
+        const nextAt =
+          r.kind === 'every' && r.everySeconds
+            ? now + r.everySeconds * 1000
+            : r.kind === 'daily'
+              ? nextDaily(r.dailyTime ?? '09:00', now)
+              : nextWeekly(r.weeklyDay ?? 0, r.dailyTime ?? '09:00', now)
+        remaining.push({ ...r, nextAt, consecutiveFailures: failures })
       } else if (!firedOk.includes(r.id)) {
         // 一次性提醒（after/at）触发失败：顺延重试，不丢
         const retries = (r.retries ?? 0) + 1

@@ -336,9 +336,12 @@ export class DshAdapter {
    * 计划模式：走 commands/execute 执行 /plan 主机命令。
    * 不经模型、不进对话流（引擎侧仅追加 command/run 生命周期），
    * 避免旧实现把 "/plan" 当用户消息发给模型污染对话。
+   * executeCommand 返回 undefined 表示命令名/语法未命中——把这个信号透传给调用方，
+   * 否则渲染层的乐观 UI 翻转在命令未生效时也无法回退。
    */
-  async togglePlanMode(sessionId: string): Promise<void> {
-    await this.client.executeCommand({ sessionId, line: '/plan' })
+  async togglePlanMode(sessionId: string): Promise<{ matched: boolean }> {
+    const result = await this.client.executeCommand({ sessionId, line: '/plan' })
+    return { matched: result !== undefined }
   }
 
   pickDirectory(): Promise<{ path: string | null }> {

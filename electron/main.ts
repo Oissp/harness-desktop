@@ -15,6 +15,11 @@ const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
+// package.json name 由 harness-desktop 改为 dsh-desktop（重命名），但 Electron 默认从
+// app 名派生 userData 路径（~/.config/<name> 等）。锁定为历史名，避免已安装用户升级后
+// app.getPath('userData') 换目录，丢失设置、凭据与 dsh 引擎 home（会话/记忆）。
+app.setName('harness-desktop')
+
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let manager: DshManager

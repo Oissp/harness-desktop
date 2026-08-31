@@ -114,8 +114,10 @@ export interface Reminder {
   weeklyDay?: number
   nextAt: number
   sessionId?: string
-  /** 触发失败顺延重试次数（上限 10 次后丢弃）。 */
+  /** 一次性提醒（after/at）触发失败顺延重试次数（上限 10 次后丢弃）。 */
   retries?: number
+  /** 周期提醒（every/daily/weekly）连续触发失败次数（上限 10 次后丢弃，成功即清零）。 */
+  consecutiveFailures?: number
 }
 
 /** 一条记忆（harness-memory 插件 memories 表）。 */
@@ -409,7 +411,8 @@ export interface HarnessApi {
   addMemory(text: string, tags?: string[]): Promise<IpcResult<MemoryItem>>
   deleteMemory(id: string): Promise<IpcResult<void>>
   clearMemories(): Promise<IpcResult<void>>
-  togglePlanMode(sessionId: string): Promise<IpcResult<void>>
+  /** matched=false 表示引擎未识别 /plan 命令（版本不匹配/功能关闭），UI 不应改变本地状态。 */
+  togglePlanMode(sessionId: string): Promise<IpcResult<{ matched: boolean }>>
   getWebSearchConfig(): Promise<IpcResult<WebSearchConfig>>
   setWebSearchConfig(config: Partial<WebSearchConfig>): Promise<IpcResult<WebSearchConfig>>
   exportSession(sessionId: string, format: 'zip' | 'json' | 'markdown'): Promise<IpcResult<{ saved: boolean; path?: string }>>

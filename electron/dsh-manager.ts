@@ -23,6 +23,8 @@ const KILL_TIMEOUT_MS = 5_000
 const STABLE_BOOT_MS = 45_000
 /** 崩溃后自动重启延迟（ms）。 */
 const AUTO_RESTART_DELAY_MS = 2_000
+/** stdout 未完成行缓冲上限（字节）：远超端口 URL 行的正常长度，防止无换行输出无限累积。 */
+const STDOUT_BUF_MAX = 64 * 1024
 
 /** dsh bin.js 的候选路径（开发 = 项目 node_modules；打包 = asar 内）。 */
 function resolveDshBin(): string {
@@ -290,8 +292,10 @@ export class DshManager {
     // 重置行缓冲，避免上一次进程的残留 stdout 串入本次端口解析
     this.stdoutBuf = ''
 
-    child.stdout?.on('data', (chunk: Buffer) => this.handleStdout(String(chunk)))
-    child.stderr?.on('data', (chunk: Buffer) => this.handleStderr(String(chunk)))
+    const onStdout = (chunk: Buffer) => this.handleStdout(String(chunk))
+    const onStderr = (chunk: Buffer) => this.handleStderr(String(chunk))
+    child.stdout?.on('data', onStdout)
+    child.stderr?.on('data', onStderr)
 
     child.on('error', (err) => {
       this.lastError = `dsh 进程启动失败: ${err.message}`
@@ -306,6 +310,11 @@ export class DshManager {
         clearTimeout(this.stableTimer)
         this.stableTimer = null
       }
+      // 显式摘除本次子进程的 stdout/stderr 监听：'exit' 可能早于管道最后的 'data'
+      // 触发（Node 文档行为），残留监听器若继续收到迟到数据会写入下一个进程
+      // 复用的 this.stdoutBuf 实例字段，污染新进程的端口解析。
+      child.stdout?.off('data', onStdout)
+      child.stderr?.off('data', onStderr)
       this.adapter?.close()
       this.adapter = null
       this.proc = null
@@ -346,6 +355,11 @@ export class DshManager {
     const lines = this.stdoutBuf.split('\n')
     // 末段可能是不完整行，留到下次拼接
     this.stdoutBuf = lines.pop() ?? ''
+    // 端口 URL 一定在启动早期的某一行内出现；若子进程持续输出不带换行符的内容，
+    // 未完成行会无限累积。超过上限即丢弃前面部分，只保留尾部用于后续行匹配。
+    if (this.stdoutBuf.length > STDOUT_BUF_MAX) {
+      this.stdoutBuf = this.stdoutBuf.slice(-STDOUT_BUF_MAX)
+    }
     for (const line of lines) {
       // alpha.2：dsh web 启动即打印 `dsh web: http://127.0.0.1:<port>/?token=<token>`
       const match = line.match(/http:\/\/127\.0\.0\.1:(\d+)(?:\/\?token=([A-Za-z0-9_-]+))?/)
@@ -382,13 +396,14 @@ export class DshManager {
   }
 
   private handleStderr(chunk: string) {
-    // 只记录错误级行，避免无害警告顶掉真实错误使 status.error 失真。
+    // 排除已知无害噪音（deprecation/warning/experimental/(node:pid) 等），
+    // 避免它们顶掉真实错误使 status.error 失真；除此之外的行都记录——
+    // 之前用"错误关键词白名单"会反过来丢弃不含这些关键词的真实致命错误
+    // （本地化消息、自定义异常、格式不同的 panic 横幅等），降低可诊断性。
     const line = chunk.trim()
     if (!line) return
-    // dsh/stderr 误告警特征：deprecation、warning、experimental、(node:pid) 等
-    if (/error|fatal|panic|unhandled|throw|EADDR|EACCES|ENOENT|ECONN/i.test(line)) {
-      this.lastError = line.slice(0, 300)
-    }
+    if (/^\(node:\d+\)|deprecat|experimental warning/i.test(line)) return
+    this.lastError = line.slice(0, 300)
   }
 
   private async waitUntilReady(): Promise<DshManagerStatus> {
