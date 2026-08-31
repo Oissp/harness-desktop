@@ -249,9 +249,12 @@ export class DshClient {
    * 成功返回 cookie 的 "name=value" 段；失败返回 null（引擎尚未就绪/令牌无效）。
    */
   async exchangeToken(token: string): Promise<boolean> {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10_000)
     try {
       const res = await fetch(`${this.baseUrl}/?token=${encodeURIComponent(token)}`, {
         redirect: 'manual',
+        signal: ctrl.signal,
       })
       if (res.status !== 303) return false
       const setCookie = res.headers.get('set-cookie') ?? res.headers.get('Set-Cookie') ?? ''
@@ -261,6 +264,8 @@ export class DshClient {
       return true
     } catch {
       return false
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -272,11 +277,19 @@ export class DshClient {
     const body: RpcRequest = { type: 'client-request', rpcId, method, payload: { args } }
     let res: Response
     try {
-      res = await fetch(`${this.baseUrl}/api/${method}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: this.authCookie },
-        body: JSON.stringify(body),
-      })
+      // 加超时：引擎假死时裸 fetch 会永久挂起，连带 IPC/UI 无响应
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 30_000)
+      try {
+        res = await fetch(`${this.baseUrl}/api/${method}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: this.authCookie },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
     } catch (err) {
       throw new DshTransportError(`dsh 通信失败（${method}）: ${(err as Error).message}`)
     }
@@ -390,6 +403,20 @@ export class DshClient {
 
   cancel(payload: { sessionId: string }): Promise<{ accepted: boolean }> {
     return this.request('session/cancel', { request: payload })
+  }
+
+  /**
+   * 执行一条斜杠命令（commands/execute）：不经模型、不进对话流，
+   * 引擎侧追加 command/run → command/done 生命周期。
+   * 用于 /plan 等主机命令——避免把命令当用户消息发给模型（污染对话）。
+   * 返回 undefined 表示命令名/语法未命中（未进 handler）。
+   */
+  executeCommand(payload: { sessionId: string; line: string; images?: unknown[] }): Promise<unknown> {
+    return this.request('commands/execute', {
+      agentId: payload.sessionId,
+      line: payload.line,
+      images: payload.images ?? [],
+    })
   }
 
   rename(payload: { sessionId: string; title: string }): Promise<{ title: string; seq: number }> {

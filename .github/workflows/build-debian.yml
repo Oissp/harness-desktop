@@ -10,7 +10,7 @@ name: Release (Debian 13)
 #   - 手动 workflow_dispatch（可强制重建当前版本）
 #
 # 发布产物（tag = v<package.json version>）：
-#   - harness-desktop_<version>_amd64.deb
+#   - dsh-desktop_<version>_amd64.deb
 #   - latest-linux.yml            ← electron-updater 检查更新必需的元数据
 #   - *.blockmap
 #
@@ -341,17 +341,21 @@ jobs:
             ## DSH Desktop ${{ needs.detect.outputs.version }}
 
             ### 产物
-            - `harness-desktop_*.deb` — Debian 13 (trixie) / amd64
+            - `dsh-desktop_*.deb` — Debian 13 (trixie) / amd64
             - `latest-linux.yml` — electron-updater 自动更新元数据（版本号 / 下载地址 / sha512）
 
             ### 安装
             ```bash
-            sudo dpkg -i harness-desktop_*.deb
+            sudo dpkg -i dsh-desktop_*.deb
             ```
 
             ### 说明
             - Debian 13 / amd64 产物；已内置 DeepSeek Harness 引擎
             - 回归单测结果见对应 Workflow run
+            - **v1.0.1 起包名由 `harness-desktop` 改为 `dsh-desktop`**：从 1.0.0 自动更新安装的是新包，旧包需手动卸载：
+              ```bash
+              sudo apt remove harness-desktop
+              ```
           # 连同 latest-linux.yml / blockmap 一起上传，缺 yml 则桌面端检查更新失败
           files: |
             release-assets/*.deb

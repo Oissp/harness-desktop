@@ -32,6 +32,8 @@ function nextWeekly(day: number, hhmm: string, now: number): number {
 
 export class ReminderManager {
   private timer: ReturnType<typeof setInterval> | null = null
+  /** tick 串行闸：fire() 走 adapter 可能远超 TICK_MS，重入直接跳过避免双发/覆盖。 */
+  private ticking = false
 
   constructor(
     private getSettings: () => AppSettings,
@@ -80,6 +82,16 @@ export class ReminderManager {
   }
 
   private async tick() {
+    if (this.ticking) return
+    this.ticking = true
+    try {
+      await this.runTick()
+    } finally {
+      this.ticking = false
+    }
+  }
+
+  private async runTick() {
     const now = Date.now()
     const reminders = this.list()
     const due = reminders.filter((r) => r.nextAt <= now)
@@ -119,7 +131,9 @@ export class ReminderManager {
     if (!adapter) return false
     try {
       const sessions = await adapter.listSessions()
-      const target = sessions.find((s) => s.sessionId === r.sessionId) ?? sessions[0]
+      // 目标会话被删时不要串门到 sessions[0]——提醒文本会落到无关会话。
+      // 直接判失败（一次性提醒走重试，周期提醒等下一轮），保留提醒记录。
+      const target = sessions.find((s) => s.sessionId === r.sessionId)
       if (!target) return false
       await adapter.sendMessage(target.sessionId, `[定时提醒] ${r.text}`)
       this.onFired?.(r, target.sessionId)

@@ -420,10 +420,10 @@ app.whenReady().then(async () => {
   setupMenu()
   // Wayland 下 Electron 会自行推断 XDG app id，推断值通常与安装的 .desktop 文件名
   // 不一致，导致 dock/任务栏图标对不上（PR #304 实践）。.desktop 文件名由
-  // electron-builder 按 package.json 的 name（harness-desktop）派生为
-  // harness-desktop.desktop（与 productName "DSH Desktop" 无关），这里显式对齐。
+  // electron-builder 按 package.json 的 name（dsh-desktop）派生为
+  // dsh-desktop.desktop（与 productName "DSH Desktop" 无关），这里显式对齐。
   if (process.platform === 'linux') {
-    app.setDesktopName('harness-desktop.desktop')
+    app.setDesktopName('dsh-desktop.desktop')
   }
   setupUpdater()
   disposeIpc = registerIpc(manager, settings, () => mainWindow, creds)

@@ -24,7 +24,7 @@
 
 ```bash
 # 下载最新 .deb 后安装
-sudo dpkg -i harness-desktop_*.deb
+sudo dpkg -i dsh-desktop_*.deb
 ```
 
 **首启**：运行 → 4 步向导（欢迎 → API Key → 工作区 → 完成）→ 开始对话。

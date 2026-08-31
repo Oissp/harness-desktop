@@ -79,7 +79,7 @@ export default function UpdateSection() {
       <h3>关于与更新</h3>
       <div className="setting-row">
         <span>当前版本</span>
-        <span className="mono">v{appVersion || '1.0.0'}</span>
+        <span className="mono">v{appVersion || '1.0.1'}</span>
       </div>
       <div className="setting-row">
         <span>项目</span>
@@ -125,7 +125,7 @@ export default function UpdateSection() {
             </span>
           )}
           {status.state === 'error' && `检查更新失败：${status.message ?? '未知错误'}`}
-          {status.state === 'up-to-date' && `已是最新版本（v${appVersion || '1.0.0'}）`}
+          {status.state === 'up-to-date' && `已是最新版本（v${appVersion || '1.0.1'}）`}
           {status.state === 'disabled' && `${status.message ?? '自动更新不可用'}`}
         </div>
       )}

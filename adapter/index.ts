@@ -332,14 +332,13 @@ export class DshAdapter {
     return this.getWebSearchConfig()
   }
 
-  /** 计划模式：通过 /plan 斜杠命令（host 命令注册表执行，无需 LLM）。 */
+  /**
+   * 计划模式：走 commands/execute 执行 /plan 主机命令。
+   * 不经模型、不进对话流（引擎侧仅追加 command/run 生命周期），
+   * 避免旧实现把 "/plan" 当用户消息发给模型污染对话。
+   */
   async togglePlanMode(sessionId: string): Promise<void> {
-    await this.client.prompt({
-      sessionId,
-      mode: 'queue',
-      content: [{ type: 'text', text: '/plan' }],
-      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    })
+    await this.client.executeCommand({ sessionId, line: '/plan' })
   }
 
   pickDirectory(): Promise<{ path: string | null }> {

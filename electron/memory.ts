@@ -2,10 +2,17 @@
  * electron/memory.ts —— harness-memory 插件记忆的桌面端读写。
  *
  * 插件把记忆持久化到 `$DSH_HOME/storages/harness_memory.json`（storage-json 单元格式）。
- * 桌面端直接读写该文件展示/管理记忆。注意：运行中的 dsh 持有内存态，
- * 桌面端写入会在 dsh 重启后完整生效（这是不改引擎前提下的最佳路径）。
+ * 桌面端直接读写该文件展示/管理记忆。
+ *
+ * 竞态说明（已知限制）：运行中的 dsh 引擎在内存中持有记忆态并自行落盘该文件，
+ * 桌面端的写入对运行中的引擎不可见，且引擎下次落盘会覆盖桌面端写入。
+ * 因此桌面端增删的记忆只在「dsh 未运行 / 重启后」才可靠生效——UI 上可读，
+ * 但不要承诺「即时生效」。彻底修复需走引擎 storageDomain RPC（当前 adapter 未暴露）。
+ *
+ * 这里至少做到：写前重读最新文件（拿到引擎最近一次落盘）+ 原子写（temp + rename），
+ * 避免引擎读到半写文件造成 storage 单元解析失败。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { MemoryItem } from '../shared/types.js'
 
@@ -33,10 +40,13 @@ function readUnit(dshHome: string): MemoryUnit {
   }
 }
 
+/** 原子写入：先写临时文件再 rename，避免引擎读到半写文件导致 storage 单元损坏。 */
 function writeUnit(dshHome: string, unit: MemoryUnit) {
   const file = memoryFile(dshHome)
   mkdirSync(join(file, '..'), { recursive: true })
-  writeFileSync(file, `${JSON.stringify(unit, null, 2)}\n`, 'utf8')
+  const tmp = `${file}.tmp-${process.pid}`
+  writeFileSync(tmp, `${JSON.stringify(unit, null, 2)}\n`, 'utf8')
+  renameSync(tmp, file)
 }
 
 export function listMemories(dshHome: string): MemoryItem[] {

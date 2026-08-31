@@ -1,6 +1,6 @@
 appId: com.harness.desktop
 productName: DSH Desktop
-copyright: Copyright © 2026 harness-desktop
+copyright: Copyright © 2026 DSH Desktop
 
 # 自动更新（021）：electron-updater 读取的发布源
 publish:
@@ -57,7 +57,7 @@ linux:
     - target: deb
       arch:
         - x64
-  maintainer: harness-desktop <zhuanz@users.noreply.github.com>
+  maintainer: Oissp <19642615+Oissp@users.noreply.github.com>
 
 # deb 压缩：保持默认 xz（fpm 1.9.3 只支持 gz|bzip2|xz）。实测 623MB 原始数据，
 # xz -3 在三个支持的压缩里体积最小（~138MB）且最快（CI ~2min）；gzip -9 更慢更大
