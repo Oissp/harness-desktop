@@ -186,7 +186,11 @@ jobs:
 
   build:
     name: Build .deb (Debian 13)
-    needs: detect
+    # 必须显式声明 sync-dsh：下面 "Apply bumped source" 步骤要读 needs.sync-dsh.*，
+    # 而 needs.<job> 只能访问本 job 自己 needs 列表里直接声明的 job（即使 detect
+    # 已经依赖了 sync-dsh，此处不写出来同样读不到，条件会静默判 false 被跳过——
+    # 这就是 v1.0.2 release 里 deb 文件名仍是 1.0.1 的根因）。
+    needs: [sync-dsh, detect]
     # 显式状态门：!cancelled() 让 sync-dsh 被 skip 时不连带跳过本 job；
     # 再要求 detect 真正成功且 should_release=true，避免拿到空输出误判。
     if: ${{ !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.should_release == 'true' }}
