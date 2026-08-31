@@ -12,6 +12,7 @@
  * 本文件只负责传输与信封，不包含业务语义。
  */
 import { randomUUID } from 'node:crypto'
+import { fetchWithTimeout } from '../shared/fetch-timeout.js'
 
 export interface RpcRequest {
   type: 'client-request'
@@ -249,13 +250,11 @@ export class DshClient {
    * 成功返回 cookie 的 "name=value" 段；失败返回 null（引擎尚未就绪/令牌无效）。
    */
   async exchangeToken(token: string): Promise<boolean> {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 10_000)
     try {
-      const res = await fetch(`${this.baseUrl}/?token=${encodeURIComponent(token)}`, {
-        redirect: 'manual',
-        signal: ctrl.signal,
-      })
+      // establishAuth 在外层以 READY_TIMEOUT_MS（90s）为总预算重试本方法；若单次超时设得
+      // 太短（曾用 10s），引擎认证接口只是偏慢而非假死时，会在总预算耗尽前被"超时→重试"
+      // 自我消耗掉，而非真正等到认证成功。与 request() 的 30s 对齐，给慢但存活的场景留够空间。
+      const res = await fetchWithTimeout(`${this.baseUrl}/?token=${encodeURIComponent(token)}`, { redirect: 'manual' }, 30_000)
       if (res.status !== 303) return false
       const setCookie = res.headers.get('set-cookie') ?? res.headers.get('Set-Cookie') ?? ''
       const m = /^([^;=]+)=([^;]*)/.exec(setCookie.trim())
@@ -264,8 +263,6 @@ export class DshClient {
       return true
     } catch {
       return false
-    } finally {
-      clearTimeout(timer)
     }
   }
 
@@ -278,18 +275,15 @@ export class DshClient {
     let res: Response
     try {
       // 加超时：引擎假死时裸 fetch 会永久挂起，连带 IPC/UI 无响应
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 30_000)
-      try {
-        res = await fetch(`${this.baseUrl}/api/${method}`, {
+      res = await fetchWithTimeout(
+        `${this.baseUrl}/api/${method}`,
+        {
           method: 'POST',
           headers: { 'content-type': 'application/json', cookie: this.authCookie },
           body: JSON.stringify(body),
-          signal: ctrl.signal,
-        })
-      } finally {
-        clearTimeout(timer)
-      }
+        },
+        30_000,
+      )
     } catch (err) {
       throw new DshTransportError(`dsh 通信失败（${method}）: ${(err as Error).message}`)
     }

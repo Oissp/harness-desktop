@@ -12,6 +12,7 @@ import type { SettingsStore } from './settings-store.js'
 import { ReminderManager } from './reminder-manager.js'
 import { addMemory, clearMemories, deleteMemory, listMemories } from './memory.js'
 import type { SafeCredentialStore } from './credential-store.js'
+import { fetchWithTimeout, isAbortError } from '../shared/fetch-timeout.js'
 import type {
   IpcResult,
   SessionStreamEvent,
@@ -356,22 +357,17 @@ export function registerIpc(
       const apiKey = String(key ?? '').trim()
       if (!apiKey) throw new Error('请输入 API Key')
       // 加超时：网络挂起时不能让 IPC 永久阻塞、UI 无响应
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 15_000)
       let res: Response
       try {
-        res = await fetch('https://api.deepseek.com/models', {
-          headers: { authorization: `Bearer ${apiKey}` },
-          signal: ctrl.signal,
-        })
+        res = await fetchWithTimeout(
+          'https://api.deepseek.com/models',
+          { headers: { authorization: `Bearer ${apiKey}` } },
+          15_000,
+        )
       } catch (err) {
         throw new Error(
-          ctrl.signal.aborted
-            ? '验证超时（15s），请检查网络后重试'
-            : `验证请求失败：${(err as Error).message}`,
+          isAbortError(err) ? '验证超时（15s），请检查网络后重试' : `验证请求失败：${(err as Error).message}`,
         )
-      } finally {
-        clearTimeout(timer)
       }
       if (!res.ok) {
         const body = await res.text().catch(() => '')

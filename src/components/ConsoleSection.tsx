@@ -32,9 +32,12 @@ export default function ConsoleSection({ sessionId, planActive, onPlanToggle }: 
       setMsg({ type: 'err', text: '请先创建/打开一个会话' })
       return
     }
-    const next = !planActive
-    onPlanToggle(next)
-    await harness.togglePlanMode(sessionId)
+    const res = await harness.togglePlanMode(sessionId)
+    if (res.ok && res.value?.matched) {
+      onPlanToggle(!planActive)
+    } else {
+      setMsg({ type: 'err', text: res.ok ? '引擎未识别计划模式命令' : res.error?.message ?? '切换失败' })
+    }
   }
 
   const saveWebSearch = async () => {
