@@ -1,65 +1,68 @@
-name: Build & Release (Debian 13)
+name: Release (Debian 13)
 
-# 同步 dsh 上游 + 自动发版（仅 Debian 13 / amd64）
-#
-# 工作原理（npm 跟随路线，非源码构建）：
-#   @deepseek-ai/dsh 的 npm 包与 GitHub release tag 已验证同步发布
-#   （tag dsh-v0.1.1-rc.2 ↔ npm 0.1.1-rc.2），因此用 npm latest 即可跟随上游，
-#   无需像 dsh-deb-builder 那样 git clone 源码 + tsdown 构建。
-#
-# 流程：
-#   1. 查 npm registry @deepseek-ai/dsh 的 latest 版本
-#   2. 与 package.json 锁定版本比对；无新版 → 结束
-#   3. 有新版 → 改版本号 → pnpm install（更新 lockfile）→ 跑回归单测
-#   4. 在 debian:13 容器内用 electron-builder 打 .deb（x64）
-#   5. 发 GitHub Release（tag = dsh-v<版本>），供 electron-updater 推送
+# 发版不依赖上游 dsh 版本号：项目功能更新后 bump package.json 版本号并推送 main 即发版。
+# 同时保留 @deepseek-ai/dsh 的 npm 版本检测：定时检测上游 latest，有新版则升级依赖
+# 并 patch-bump 应用版本号（与 dsh 版本号解耦，仅标记"依赖更新发版"），随本次发版一起发布。
 #
 # 触发：
-#   - 定时：每日 UTC 06:00（北京时间 14:00）自动检查
-#   - 手动：workflow_dispatch（可指定版本号或强制重建当前版本）
+#   - schedule：每日 UTC 06:00 检测 dsh 上游（有更新则升级依赖 + 发版）
+#   - push 到 main（package.json 变更，即版本号 bump）：功能更新发版
+#   - 手动 workflow_dispatch（可强制重建当前版本）
+#
+# 发布产物（tag = v<package.json version>）：
+#   - harness-desktop_<version>_amd64.deb
+#   - latest-linux.yml            ← electron-updater 检查更新必需的元数据
+#   - *.blockmap
+#
+# 幂等：若 v<version> release 已存在则跳过，避免重复发版。
 
 on:
   schedule:
     # 每日 UTC 06:00（= 北京时间 14:00）；GitHub cron 不保证准点，但会执行
     - cron: '0 6 * * *'
+  push:
+    branches: [main]
+    paths: ['package.json']
   workflow_dispatch:
     inputs:
-      version:
-        description: '要同步到的 dsh 版本（留空 = 跟随 npm latest）'
+      dsh_version:
+        description: '要同步到的 dsh 版本（留空 = 跟随 npm latest；仅 schedule/dispatch 时用）'
         required: false
         type: string
       force:
-        description: '强制用当前锁定版本重建并发版（即使无上游变更）'
+        description: '强制重建当前版本（即使 v<version> release 已存在）'
         required: false
         type: boolean
         default: false
 
 permissions:
-  contents: write   # 发 Release / 推 tag 需要写权限
+  contents: write   # 发 Release / 推 tag / 提交依赖升级需要写权限
 
 jobs:
-  sync:
-    name: Sync & Detect
+  sync-dsh:
+    name: Sync dsh dependency
+    # 仅定时 / 手动触发时检测 dsh 上游；push（功能更新）时跳过
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.diff.outputs.changed }}
-      new_version: ${{ steps.diff.outputs.new_version }}
-      old_version: ${{ steps.diff.outputs.old_version }}
+      bumped: ${{ steps.diff.outputs.changed }}
+      new_version: ${{ steps.bump.outputs.new_version }}
+      old_dsh: ${{ steps.locked.outputs.locked }}
+      new_dsh: ${{ steps.target.outputs.target }}
     steps:
       - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.21.0
 
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          # setup-node@v5 读到 package.json 的 packageManager 字段会自动启用 pnpm
-          # 缓存；sync job 不做依赖安装（pnpm install 被 changed 条件跳过），store
-          # 目录不存在，Post cleanup 保存缓存时报 Path Validation Error。
-          # 显式关闭自动缓存；依赖安装在 build job（debian:13 容器内）完成。
+          # sync job 不做依赖安装（bumped 条件才 pnpm install），store 目录可能不存在，
+          # 关闭自动缓存避免 Post cleanup 报 Path Validation Error。
           package-manager-cache: false
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.21.0 --activate
 
       - name: Read locked dsh version
         id: locked
@@ -67,20 +70,17 @@ jobs:
           # 从 package.json 提取当前锁定的 @deepseek-ai/dsh 版本号
           VER=$(node -e "console.log(require('./package.json').dependencies['@deepseek-ai/dsh'])")
           echo "locked=$VER" >> "$GITHUB_OUTPUT"
-          echo "当前锁定版本: $VER"
+          echo "当前锁定 dsh 版本: $VER"
 
-      - name: Resolve target version
+      - name: Resolve target dsh version
         id: target
         run: |
-          # 决定本次要同步到哪个版本：
-          #   - 手动指定版本 → 用输入值
-          #   - 自动/留空    → 查 npm registry 的 latest dist-tag
-          INPUT="${{ inputs.version }}"
+          # 手动指定版本 → 用输入值；否则查 npm registry 的 latest dist-tag
+          INPUT="${{ inputs.dsh_version }}"
           if [ -n "$INPUT" ]; then
             TARGET="$INPUT"
-            echo "使用手动指定的版本: $TARGET"
+            echo "使用手动指定的 dsh 版本: $TARGET"
           else
-            # 直接打 npm registry API（不经 npm CLI，避免缓存问题）
             TARGET=$(curl -fsSL --max-time 20 \
               "https://registry.npmjs.org/@deepseek-ai%2Fdsh" \
               | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d['dist-tags'].latest)")
@@ -88,60 +88,43 @@ jobs:
               echo "::error::无法从 npm registry 查询 @deepseek-ai/dsh latest 版本"
               exit 1
             fi
-            echo "npm latest 版本: $TARGET"
+            echo "npm latest dsh 版本: $TARGET"
           fi
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
 
-      - name: Compare versions
+      - name: Compare dsh versions
         id: diff
         run: |
           LOCKED="${{ steps.locked.outputs.locked }}"
           TARGET="${{ steps.target.outputs.target }}"
-          echo "old_version=$LOCKED" >> "$GITHUB_OUTPUT"
-          echo "new_version=$TARGET" >> "$GITHUB_OUTPUT"
-
-          FORCE="${{ inputs.force }}"
-          if [ "$FORCE" = "true" ]; then
-            echo "::notice::强制重建模式，跳过版本比对"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           if [ "$LOCKED" = "$TARGET" ]; then
-            echo "无上游变更（$LOCKED == $TARGET），跳过"
+            echo "无上游变更（$LOCKED == $TARGET），不升级依赖"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "检测到上游变更：$LOCKED → $TARGET"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Bump version & update lockfile
+      - name: Bump dsh dep + patch-bump app version
+        id: bump
         if: steps.diff.outputs.changed == 'true'
         run: |
-          TARGET="${{ steps.diff.outputs.new_version }}"
-          PKG="package.json"
-          # 精确替换 @deepseek-ai/dsh 的版本号（保持无 ^ 前缀的精确锁定）
+          TARGET="${{ steps.target.outputs.target }}"
+          # 升级 dsh 依赖到目标版本；应用版本号 patch-bump（与 dsh 版本号解耦，
+          # 仅表示"依赖更新发版"）。--no-git-tag-version 只改 package.json，不打 tag（tag 由发版打）。
           node -e "
-            const fs=require('fs');
-            const p='$PKG';
-            const j=JSON.parse(fs.readFileSync(p,'utf8'));
+            const fs=require('fs');const p='./package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));
             j.dependencies['@deepseek-ai/dsh']='$TARGET';
-            fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n');
+            const m=j.version.match(/^(\d+)\.(\d+)\.(\d+)/);
+            if(!m){throw new Error('invalid app version: '+j.version);}
+            j.version=m[1]+'.'+m[2]+'.'+(Number(m[3])+1);
+            fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
           "
-          echo "已将 @deepseek-ai/dsh 改为 $TARGET"
-
-          # 同步应用版本号到 dsh 版本（便于发版 tag 追溯上游）
-          # 应用自身版本用 dsh 版本号，使 Release tag 直接反映上游版本
-          node -e "
-            const fs=require('fs');
-            const p='$PKG';
-            const j=JSON.parse(fs.readFileSync(p,'utf8'));
-            j.version='$TARGET';
-            fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n');
-          "
-
-          # 更新 pnpm-lock.yaml
+          # 更新 lockfile 以匹配新依赖版本
           pnpm install --no-frozen-lockfile
+          NEW_VER=$(node -e "console.log(require('./package.json').version)")
+          echo "已升级 dsh → $TARGET，应用版本号 patch-bump → $NEW_VER"
+          echo "new_version=$NEW_VER" >> "$GITHUB_OUTPUT"
 
       - name: Upload bumped source
         if: steps.diff.outputs.changed == 'true'
@@ -153,29 +136,64 @@ jobs:
             pnpm-lock.yaml
           retention-days: 3
 
+  detect:
+    name: Decide release
+    needs: sync-dsh
+    # sync-dsh 在 push 触发时被跳过，这里 always() 保证 detect 仍运行
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FORCE="${{ inputs.force }}"
+          # 版本：dsh 同步 patch-bump 后用新版本；否则用检出（推送）的版本
+          VERSION="${{ needs.sync-dsh.outputs.new_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -e "console.log(require('./package.json').version)")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "待发布版本: $VERSION"
+
+          if [ "$FORCE" = "true" ]; then
+            echo "::notice::强制重建模式，跳过已发布检查"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 幂等：v<version> release 已存在则跳过
+          if gh release view "v$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "v$VERSION release 已存在，跳过发布"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$VERSION release 不存在，继续发布"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build .deb (Debian 13)
-    needs: sync
-    if: needs.sync.outputs.changed == 'true'
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     container:
       # 用 Debian 13 (trixie) 容器构建，确保产物 glibc/库依赖与 Debian 13 匹配。
-      # electron-builder 打 deb 时链接的原生模块（koffi/node-pty）和 Electron
-      # 运行时都依赖系统 glibc 版本；在 trixie 内构建 = 最低在 trixie 上可运行。
       image: debian:13
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download bumped source
+      - name: Apply bumped source (dsh sync)
+        if: needs.sync-dsh.result == 'success' && needs.sync-dsh.outputs.bumped == 'true'
         uses: actions/download-artifact@v7
         with:
           name: bumped-source
           path: .
 
-      # 缓存 electron-builder 的下载缓存（electron 42.9.3 zip ≈123MB + fpm/7zip ≈5MB），
-      # 容器 HOME 每次 run 都是全新目录，不缓存则每次重下（CI 日志每次都有 downloading 行）。
-      # key 只用 electron-builder.yml：electronVersion 与 deb 配置都钉在其中，dsh 版本升级不失效。
-      # v6 跑在 node24（v4 目标 node20 已废弃，CI 日志有 deprecation 警告）；key 不变。
       - name: Cache electron & electron-builder binaries
         uses: actions/cache@v6
         with:
@@ -186,10 +204,6 @@ jobs:
 
       - name: Install build prerequisites (Debian 13)
         run: |
-          # Debian 13 (trixie) 的软件源；更新并安装构建链。
-          # electron-builder 需要：node(pnpm 装) + 基础工具(file + git + python3)。
-          # libglib2.0-dev 等是 node-pty / koffi 原生模块编译的依赖。
-          # libnss3 / libgbm1 等是 Electron 运行时共享库依赖。
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             ca-certificates curl gnupg git python3 make g++ xz-utils file \
@@ -197,8 +211,6 @@ jobs:
             libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
             libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
             libxfixes3 libxrandr2 libgbm1 libasound2
-          # 安装 Node.js 22（Debian 13 仓库已有 nodejs，但版本可能偏旧；
-          # 用 NodeSource 装确定版本的 node 22，含 corepack）
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
           apt-get install -y nodejs
           node --version
@@ -211,18 +223,12 @@ jobs:
           pnpm --version
 
       - name: Install dependencies
-        run: |
-          pnpm install --no-frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
         env:
-          # pnpm 配置：hoisted 布局（pnpm-workspace.yaml 已声明），
-          # 这里确保 CI 也用扁平 node_modules，与 after-pack.mjs 的复制逻辑一致。
           PNPM_NODE_LINKER: hoisted
 
       - name: Run regression tests
-        run: |
-          # 回归单测：adapter/events.ts 事件归一化 + chatReducer + tasks
-          # 这是上游 dsh 升级后唯一可能断裂的点（见 MIGRATION-DESIGN.md §6.4）
-          pnpm test
+        run: pnpm test
         continue-on-error: true
         id: tests
 
@@ -231,23 +237,17 @@ jobs:
         run: |
           echo "::warning::回归单测失败。可能是 dsh 上游事件结构/API 变更导致。"
           echo "::warning::已继续构建（单测失败不阻塞发版），但请人工检查 adapter/events.ts。"
-          echo "::warning::若确认是上游破坏性变更，需手动适配 events.ts 的归一化逻辑。"
 
       - name: Build renderer & electron main
-        run: |
-          pnpm build
+        run: pnpm build
 
       - name: Package .deb (linux x64)
-        run: |
-          # 只打 deb + x64，跳过 AppImage/mac/win，减少产物与时间
-          # electron-builder 的 linux.deb target 已在 electron-builder.yml 配好
-          npx electron-builder --linux deb --x64 --publish never
+        run: npx electron-builder --linux deb --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Verify .deb control info (Debian 13 compatibility)
         run: |
-          # 验证产物存在并打印依赖信息，确认是 Debian 可装的 deb
           DEB=$(ls out/*.deb 2>/dev/null | head -1)
           if [ -z "$DEB" ]; then
             echo "::error::未找到 .deb 产物"
@@ -257,83 +257,94 @@ jobs:
           echo "--- control ---"
           dpkg-deb -I "$DEB"
           echo "--- 内容(前30行) ---"
-          # 2>/dev/null 压掉 head -30 提前截断导致的 "tar subprocess was killed by signal (Broken pipe)"
           dpkg-deb -c "$DEB" 2>/dev/null | head -30
 
-      - name: Verify .deb integrity (PR #304 实践)
+      - name: Verify update metadata
         run: |
-          # magic bytes + 关键运行时路径 + 平台纯净性校验
-          # 兜住 after-pack.mjs 整体复制 node_modules 可能出的错：
-          #   依赖闭包缺失、koffi 平台不符、非目标平台 prebuild 泄入等
-          node scripts/verify-deb.mjs
+          # electron-updater 检查更新必须读到 latest-linux.yml，缺它则 checkForUpdates
+          # 直接 ERR_UPDATER_CHANNEL_FILE_NOT_FOUND。这里校验它确实生成了。
+          if [ ! -f out/latest-linux.yml ]; then
+            echo "::error::未找到 out/latest-linux.yml，桌面端检查更新将失效"
+            exit 1
+          fi
+          echo "--- latest-linux.yml ---"
+          cat out/latest-linux.yml
 
-      - name: Upload .deb artifact
+      - name: Verify .deb integrity (PR #304 实践)
+        run: node scripts/verify-deb.mjs
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: harness-desktop-deb
-          path: out/*.deb
+          name: release-assets
+          path: |
+            out/*.deb
+            out/latest-linux.yml
+            out/*.blockmap
           retention-days: 14
 
   release:
     name: Publish Release
-    needs: [sync, build]
-    if: needs.sync.outputs.changed == 'true'
+    needs: [sync-dsh, detect, build]
+    if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download bumped source
+      - name: Apply bumped source (for commit)
+        if: needs.sync-dsh.result == 'success' && needs.sync-dsh.outputs.bumped == 'true'
         uses: actions/download-artifact@v7
         with:
           name: bumped-source
           path: .
 
-      - name: Download .deb artifact
+      - name: Download build artifacts
         uses: actions/download-artifact@v7
         with:
-          name: harness-desktop-deb
+          name: release-assets
           path: release-assets
 
       - name: Show release assets
         run: ls -lh release-assets/
 
-      - name: Commit version bump
+      - name: Commit dsh sync bump
+        if: needs.sync-dsh.result == 'success' && needs.sync-dsh.outputs.bumped == 'true'
         run: |
-          # 把版本号变更提交回仓库，使仓库始终反映"当前发布的是哪个上游版本"
+          # 把 dsh 依赖升级 + 应用版本号 patch-bump 提交回仓库
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json pnpm-lock.yaml
-          git commit -m "chore(sync): @deepseek-ai/dsh ${{ needs.sync.outputs.old_version }} → ${{ needs.sync.outputs.new_version }}" || true
+          git commit -m "chore(sync): @deepseek-ai/dsh ${{ needs.sync-dsh.outputs.old_dsh }} → ${{ needs.sync-dsh.outputs.new_dsh }}" || true
           git push
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          # tag 与 dsh 上游 tag 对齐（dsh-v<版本>），便于追溯对应的上游 release
-          tag_name: dsh-v${{ needs.sync.outputs.new_version }}
-          name: harness-desktop ${{ needs.sync.outputs.new_version }} (Debian 13)
+          # tag 用 v<应用版本>：electron-updater 的 GitHub provider 用 semver.valid(tag)
+          # 解析 Atom feed 里的 tag，非 v<semver> 形态会被整条跳过 → 检查更新报"无可用版本"。
+          tag_name: v${{ needs.detect.outputs.version }}
+          name: DSH Desktop ${{ needs.detect.outputs.version }}
           body: |
-            ## 自动同步上游 release
-
-            **@deepseek-ai/dsh**: `${{ needs.sync.outputs.old_version }}` → `${{ needs.sync.outputs.new_version }}`
+            ## DSH Desktop ${{ needs.detect.outputs.version }}
 
             ### 产物
-            - `harness-desktop-*.deb` — Debian 13 (trixie) / amd64
+            - `harness-desktop_*.deb` — Debian 13 (trixie) / amd64
+            - `latest-linux.yml` — electron-updater 自动更新元数据（版本号 / 下载地址 / sha512）
 
             ### 安装
             ```bash
-            sudo dpkg -i harness-desktop-*.deb
+            sudo dpkg -i harness-desktop_*.deb
             ```
 
             ### 说明
-            - 本版本由 GitHub Action 自动跟随 `@deepseek-ai/dsh` 的 npm latest 构建
-            - 仅构建 Debian 13 / amd64 产物
+            - Debian 13 / amd64 产物；已内置 DeepSeek Harness 引擎
             - 回归单测结果见对应 Workflow run
-            - 上游 release notes: https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v${{ needs.sync.outputs.new_version }}
-          files: release-assets/*.deb
-          generate_release_notes: false
+          # 连同 latest-linux.yml / blockmap 一起上传，缺 yml 则桌面端检查更新失败
+          files: |
+            release-assets/*.deb
+            release-assets/latest-linux.yml
+            release-assets/*.blockmap
+          generate_release_notes: true
           draft: false
-          # 任何含 '-' 的版本号都是 semver 预发布（alpha/beta/rc/dev 等），
-          # 标记为 prerelease，避免预发布版被当成正式版推送更新。
-          # 定时任务只跟 npm latest（稳定）；预发布版需手动 workflow_dispatch 指定版本号。
-          prerelease: ${{ contains(needs.sync.outputs.new_version, '-') }}
+          # 任何含 '-' 的版本号都是 semver 预发布（alpha/beta/rc/dev 等），标记为 prerelease。
+          prerelease: ${{ contains(needs.detect.outputs.version, '-') }}

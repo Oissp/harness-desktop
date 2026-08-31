@@ -1,133 +1,75 @@
-# harness-desktop — DeepSeek Harness 彩色桌面端（开箱即用版）
+# DSH Desktop — DeepSeek Harness 彩色桌面端
 
 > **开箱即用的 AI 助手工作台** · The out-of-the-box desktop client for DeepSeek Harness.
 > Download, install, double-click, and chat — no terminal, no environment setup.
 
-## 彩色外观 · 随你配色
-
-把这台工作台调成你的颜色：**深色 / 浅色 / 跟随系统**三种主题，**DeepSeek 蓝 / 绿 / 紫 / 橙**四种主题色，再加上**字体大小**与**消息密度**——全部即时生效、重启保留，让每一天的 Harness 都换个心情。
-
 ![splash](assets/screenshots/splash.png)
-
-## 截图
-
-**启动界面**
-
-![splash](assets/screenshots/splash.png)
-
-**主界面（官方 DeepSeek Harness Web UI 集成 + 品牌）**
 
 ![main](assets/screenshots/main.png)
 
-## 特性
+## 主要功能
 
 - **开箱即用**：内置 DeepSeek Harness 引擎，装完即聊；首启 4 步向导 3 分钟上手
 - **流式聊天**：打字机输出 + 思考过程可视化，如 ChatGPT 般顺滑
 - **任务面板**：任务追踪 / 自动复盘 / 失败重试，一条消息一个任务
 - **Agent 进化**：记忆自动沉淀（偏好/项目约定/成功做法）+ 同类任务自动提炼技能
+- **彩色外观**：深色 / 浅色 / 跟随系统主题 × DeepSeek 蓝 / 绿 / 紫 / 橙主题色，字体 / 消息密度可调，即时生效
+- **自动更新**：启动后台检查 + 设置页 / 托盘一键检查，发现新版本自动下载，重启即更新
 - **安全**：严格 CSP / 单实例锁 / 附件限制 / safeStorage 密钥加密
-- **外观（彩色可定制）**：深色 / 浅色 / 跟随系统主题 × DeepSeek 蓝 / 绿 / 紫 / 橙四种主题色，字体 / 消息密度可调，即时生效
 - **托盘常驻**：关闭最小化到托盘，后台持续运行
 
-## 快速开始
+## 安装
 
-### 安装（三平台）
+**Debian 13 / amd64 安装包**（`.deb`）：[GitHub Releases](https://github.com/Oissp/harness-desktop/releases)
 
-**macOS / Windows / Linux 安装包**：[GitHub Releases](https://github.com/988hj7tczd-oss/harness-desktop/releases) 下载对应平台安装包（dmg / exe / AppImage / deb）
-
-**npm 一键安装**（自动下载对应平台安装包）：
 ```bash
-npm install -g harness-desktop
-# npm 新版默认拦截安装脚本，如需自动下载安装包加参数：
-npm install -g --allow-scripts=harness-desktop harness-desktop
-harness-desktop        # 启动安装
+# 下载最新 .deb 后安装
+sudo dpkg -i harness-desktop_*.deb
 ```
 
-**Homebrew**（macOS）：
-```bash
-brew tap 988hj7tczd-oss/harness-desktop
-brew install harness-desktop
-```
+**首启**：运行 → 4 步向导（欢迎 → API Key → 工作区 → 完成）→ 开始对话。
+API Key 于 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 获取。
 
-**国内加速（Gitee 镜像）**：https://gitee.com/jerryweizhihao/harness-desktop
-
-### 首启
-运行 → 4 步向导（欢迎 → 配置 API Key → 选择工作区 → 完成）→ 开始对话
-
-**API Key**：前往 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 获取（示例中所有密钥均为占位符 `YOUR_API_KEY`）
-
-> 未提供安装包时可用开发模式运行：
+> 无安装包时可用开发模式运行：
 > ```bash
 > pnpm install
 > pnpm dev
 > ```
 
-## 命令行使用
+## 检查更新
 
-**npm 一键安装 + 启动**：
-```bash
-# 安装（自动下载对应平台安装包）
-npm install -g harness-desktop
-# npm 新版默认拦截安装脚本，如需自动下载加参数：
-npm install -g --allow-scripts=harness-desktop harness-desktop
+应用内置 electron-updater，启动 15 秒后自动检查 GitHub Release 新版本，之后每 6 小时复检一次；也可在「设置 → 关于与更新」或托盘菜单手动「检查更新」。发现新版本时自动后台下载，下载完成后提示重启安装。
 
-# 启动安装（打开已下载的 dmg/exe/AppImage）
-harness-desktop
+更新检测读取 Release 里的 `latest-linux.yml`（版本号 / 下载地址 / sha512）并与本地版本比对，命中新版本即下载并通过 `dpkg -i` 安装。
 
-# 检查是否已下载
-harness-desktop --check
-```
+## 发布机制
 
-**Homebrew（macOS）**：
-```bash
-brew tap 988hj7tczd-oss/harness-desktop
-brew install harness-desktop
-```
+发版由 `package.json` 的 `version` 驱动，**不依赖上游 dsh 版本号**：项目功能更新后 bump 版本号、推送 `main` 分支，CI 即构建 `.deb` + `latest-linux.yml` 并发布 `v<version>` Release。
 
-**直接下载安装包**：
-```bash
-# macOS (Apple Silicon)
-curl -L -o harness-desktop.dmg "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg"
-# Windows
-curl -L -o harness-desktop.exe "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe"
-# Linux
-curl -L -o harness-desktop.AppImage "https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage"
-chmod +x harness-desktop.AppImage && ./harness-desktop.AppImage
-```
+同时保留 **dsh 上游 npm 版本检测**：每日定时检查 `@deepseek-ai/dsh` 的 npm latest，有新版则升级依赖并对应用版本号做 patch-bump（与 dsh 版本号解耦，仅标记"依赖更新发版"），随本次发版一起发布。dsh 引擎依赖的升级也视作一次发版。详见 `.github/workflows/build-debian.yml`。
 
-**国内加速（Gitee 镜像）**：https://gitee.com/jerryweizhihao/harness-desktop
-
-## 开发指南
+## 开发
 
 ```bash
-pnpm install      # 安装依赖
+pnpm install      # 安装依赖（Node >=22.19，pnpm >=9）
 pnpm dev          # 开发模式：vite + electron（HMR）
 pnpm build        # 构建 renderer + main
-pnpm test         # 运行单元测试（Vitest）
+pnpm test         # 单元测试（Vitest）
 pnpm typecheck    # TS 类型检查
 pnpm dist         # 打包 Debian 13 .deb（amd64，输出到 out/）
 ```
 
-提示词工作流说明见 [prompts/README.md](prompts/README.md)。
-
 ## 技术栈
 
-- **引擎**：DeepSeek Harness `@deepseek-ai/dsh@0.1.1-rc.2`（跟踪官方 latest，同步官方功能）
-- **桌面壳**：Electron 43 + electron-builder
+- **引擎**：DeepSeek Harness `@deepseek-ai/dsh`
+- **桌面壳**：Electron 43（Linux 产物钉 42.9.3）+ electron-builder
 - **前端**：React 18 + TypeScript + Vite（手写 CSS + `--dsw-*` token，无重型 UI 库）
 - **隔离层**：`adapter/` 独立封装 dsh API，上游变更只改 adapter，renderer 永不见 dsh 原始字段
 
-## DSH 生态
-
-- 📦 [awesome-dsh-plugin](https://github.com/988hj7tczd-oss/awesome-dsh-plugin) — DeepSeek Harness 插件精选列表（本项目已收录于 Desktop Clients 板块）
-- 🖱️ [dsh-computer-use](https://github.com/988hj7tczd-oss/dsh-computer-use) — Computer Use 插件：给 harness-desktop 增加"虚拟鼠标真人操作"能力
-- 🌐 独立站：[aibunkhouse.com](https://aibunkhouse.com) · 工具页：[aibunkhouse.com/tools](https://aibunkhouse.com/tools)
-
-## 已知限制（诚实标注）
+## 已知限制
 
 - **体积**：安装包约 130-230MB（内置完整 dsh 引擎 + Electron 框架）
-- **平台**：仅构建 Debian 13 (trixie) / amd64 .deb（见 `.github/workflows/build-debian.yml`，自动跟随 dsh 上游 npm latest）
-- **dsh 引擎**：处于 rc 预览期，本项目跟踪官方 latest `0.1.1-rc.2`
+- **平台**：仅构建 Debian 13 (trixie) / amd64 `.deb`
 
 ## License
 

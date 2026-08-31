@@ -1,6 +1,6 @@
 {
   "name": "harness-desktop",
-  "version": "0.1.2-alpha.2",
+  "version": "1.0.0",
   "description": "Desktop Client for DeepSeek Harness",
   "main": "dist-electron/electron/main.js",
   "type": "module",

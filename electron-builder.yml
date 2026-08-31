@@ -1,5 +1,5 @@
 appId: com.harness.desktop
-productName: harness-desktop
+productName: DSH Desktop
 copyright: Copyright © 2026 harness-desktop
 
 # 自动更新（021）：electron-updater 读取的发布源

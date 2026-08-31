@@ -1,76 +1,35 @@
-# harness-desktop — Colorful desktop client for DeepSeek Harness
+# DSH Desktop — Colorful desktop client for DeepSeek Harness
 
 > **Download, install, double-click, and chat** — no terminal, no environment setup.
-> The official DeepSeek Harness Web UI, wrapped in a native desktop shell for macOS, Windows, and Linux.
+> The official DeepSeek Harness Web UI, wrapped in a native desktop shell.
 
 [中文 README](README.md)
 
-## Colorful appearance · make it yours
-
-Paint this workbench your way: **dark / light / follow-system** themes × **DeepSeek blue / green / purple / orange** accent colors, plus **font size** and **message density** — all applied live and persisted across restarts, so every day of Harness gets its own look.
-
 ![splash](assets/screenshots/splash.png)
-
-## Screenshots
-
-**Splash (startup)**
-
-![splash](assets/screenshots/splash.png)
-
-**Main UI (official DeepSeek Harness Web UI integrated, with brand)**
 
 ![main](assets/screenshots/main.png)
 
 ## Features
 
-- **Out-of-the-box**: built-in DeepSeek Harness engine — install and chat. First-run wizard gets you started in 3 minutes
-- **Official UI, deeply integrated**: the window loads the engine's own Web UI (same-origin, not an iframe) — chat, sessions, trajectory, and settings are all the official experience
+- **Out-of-the-box**: built-in DeepSeek Harness engine — install and chat. First-run wizard in 3 minutes
 - **Streaming chat**: typewriter output + thinking visualization
 - **Task panel**: task tracking / auto-review / failure retry
 - **Agent evolution**: memory auto-persists (preferences / project conventions / success patterns) + skills auto-distilled from repeated tasks
+- **Colorful appearance**: dark / light / follow-system themes × DeepSeek blue / green / purple / orange accents, font size / message density, applied live
+- **Auto-update**: background check on startup + manual check from Settings/tray; downloads new versions and installs on restart
 - **Security**: strict CSP / single-instance lock / attachment limits / safeStorage-encrypted credentials
-- **Appearance (colorful & customizable)**: dark / light / follow-system themes × DeepSeek blue / green / purple / orange accents, font size / message density, applied live
 - **System tray**: minimize to tray and keep running in background
-- **3 platforms, native builds**: GitHub Actions matrix builds each platform on its own native runner
 
 ## Install
 
-### npm (one command, auto-downloads platform installer)
+**Debian 13 / amd64 installer** (`.deb`): [GitHub Releases](https://github.com/Oissp/harness-desktop/releases)
 
 ```bash
-npm install -g harness-desktop
-# npm may block install scripts by default; use this to auto-download:
-npm install -g --allow-scripts=harness-desktop harness-desktop
-
-# Launch the installer
-harness-desktop
-
-# Check download status
-harness-desktop --check
+# download the latest .deb, then:
+sudo dpkg -i harness-desktop_*.deb
 ```
 
-### Homebrew (macOS)
-
-```bash
-brew tap 988hj7tczd-oss/harness-desktop
-brew install harness-desktop
-```
-
-### Direct download
-
-| Platform | Installer |
-|---|---|
-| macOS Apple Silicon | [harness-desktop-0.1.3-arm64.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3-arm64.dmg) |
-| macOS Intel | [harness-desktop-0.1.3.dmg](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.dmg) |
-| Windows x64 | [harness-desktop.Setup.0.1.3.exe](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop.Setup.0.1.3.exe) |
-| Linux x64 | [harness-desktop-0.1.3.AppImage](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop-0.1.3.AppImage) / [.deb](https://github.com/988hj7tczd-oss/harness-desktop/releases/download/v0.1.3/harness-desktop_0.1.3_amd64.deb) |
-
-**China mirror (Gitee)**: https://gitee.com/jerryweizhihao/harness-desktop
-
-### First run
-
-Run → 4-step wizard (welcome → API Key → workspace → done) → start chatting.
-
+**First run**: Run → 4-step wizard (welcome → API Key → workspace → done) → start chatting.
 Get your API Key at [platform.deepseek.com](https://platform.deepseek.com/api_keys).
 
 > No installer? Run from source:
@@ -79,35 +38,40 @@ Get your API Key at [platform.deepseek.com](https://platform.deepseek.com/api_ke
 > pnpm dev
 > ```
 
+## Check for updates
+
+The app embeds electron-updater. It auto-checks for new GitHub Release versions 15s after startup, then every 6 hours; you can also check manually from Settings → About & Update or the tray menu. New versions download in the background and prompt a restart to install.
+
+Update detection reads `latest-linux.yml` from the Release (version / download URL / sha512), compares against the local version, and on a hit downloads and installs via `dpkg -i`.
+
+## Release mechanism
+
+Releases are driven by `package.json`'s `version` and **do not depend on the upstream dsh version number**: bump the version after a feature update, push to `main`, and CI builds the `.deb` + `latest-linux.yml` and publishes a `v<version>` Release.
+
+The **dsh upstream npm version detection is retained**: a daily scheduled check queries `@deepseek-ai/dsh`'s npm latest, and on a new version upgrades the dependency and patch-bumps the app version (decoupled from the dsh version number — just marks a "dependency-update release"), released in the same run. A dsh engine dependency bump is itself a release. See `.github/workflows/build-debian.yml`.
+
 ## Development
 
 ```bash
-pnpm install      # install dependencies
+pnpm install      # install deps (Node >=22.19, pnpm >=9)
 pnpm dev          # dev mode: vite + electron (HMR)
 pnpm build        # build renderer + main
-pnpm test         # run unit tests (Vitest)
+pnpm test         # unit tests (Vitest)
 pnpm typecheck    # TS type check
 pnpm dist         # package Debian 13 .deb (amd64, output to out/)
 ```
 
 ## Tech Stack
 
-- **Engine**: DeepSeek Harness `@deepseek-ai/dsh@0.1.1-rc.2` (tracks official latest)
-- **Shell**: Electron 43 + electron-builder
+- **Engine**: DeepSeek Harness `@deepseek-ai/dsh`
+- **Shell**: Electron 43 (Linux artifacts pinned to 42.9.3) + electron-builder
 - **Frontend**: React 18 + TypeScript + Vite (hand-written CSS + `--dsw-*` tokens, no heavy UI libs)
 - **Isolation layer**: `adapter/` encapsulates the dsh API — upstream changes only touch the adapter, the renderer never sees raw dsh fields
-
-## DSH Ecosystem
-
-- 📦 [awesome-dsh-plugin](https://github.com/988hj7tczd-oss/awesome-dsh-plugin) — curated list of DeepSeek Harness plugins (this project is featured under "Desktop Clients")
-- 🖱️ [dsh-computer-use](https://github.com/988hj7tczd-oss/dsh-computer-use) — Computer Use plugin: gives harness-desktop human-like virtual mouse control
-- 🌐 Website: [aibunkhouse.com](https://aibunkhouse.com) · Tools: [aibunkhouse.com/tools](https://aibunkhouse.com/tools)
 
 ## Known Limitations
 
 - **Size**: installers ~130-230MB (bundled dsh engine + Electron)
-- **Platform**: only Debian 13 (trixie) / amd64 .deb is built (see `.github/workflows/build-debian.yml`, auto-tracks dsh upstream npm latest)
-- **dsh engine**: preview (rc), tracks official latest `0.1.1-rc.2`
+- **Platform**: only Debian 13 (trixie) / amd64 `.deb` is built
 
 ## License
 

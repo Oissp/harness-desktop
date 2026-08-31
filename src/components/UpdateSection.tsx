@@ -38,11 +38,11 @@ export default function UpdateSection() {
       <h3>关于与更新</h3>
       <div className="setting-row">
         <span>当前版本</span>
-        <span className="mono">v{appVersion || '0.1.0'}</span>
+        <span className="mono">v{appVersion || '1.0.0'}</span>
       </div>
       <div className="setting-row">
         <span>项目</span>
-        <span>harness-desktop · 开箱即用的 DeepSeek Harness 桌面客户端</span>
+        <span>DSH Desktop · 开箱即用的 DeepSeek Harness 桌面客户端</span>
       </div>
       <div className="setting-row">
         <span>平台</span>

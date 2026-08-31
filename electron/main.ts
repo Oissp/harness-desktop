@@ -27,6 +27,14 @@ let trayHintShown = false
 // 注意：macOS 自动更新依赖代码签名（017）；未签名时自动更新被禁用，静默跳过。
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
+// electron-updater 按 semver 预发布标识符划分更新通道：0.1.1-rc.2 属 "rc" 通道，
+// 1.0.0 属稳定通道。本仓库自 1.0.0 起用应用自身版本号（与 dsh 引擎版本解耦），
+// 但仍有 0.1.x 预发布版用户需要跨通道升级到稳定版。固定 allowPrerelease=true 并把
+// 检查通道设为 "alpha"（落入 alpha/beta 特殊集合 → shouldFetchVersion=true），可使
+// 预发布版用户匹配到稳定版 release（hrefChannel=null 也命中）；稳定版用户同样能
+// 发现新稳定版。待所有用户迁移到 1.0.0+ 后可移除这两行，回归默认的 /releases/latest 路径。
+autoUpdater.allowPrerelease = true
+autoUpdater.channel = 'alpha'
 
 function setupUpdater() {
   // 打包环境才启用自动更新（dev 模式跳过）；未签名 macOS 构建 updater 不活跃，静默跳过
@@ -54,7 +62,7 @@ function setupUpdater() {
   autoUpdater.on('update-downloaded', (info) => {
     mainWindow?.webContents.send('update:status', { state: 'downloaded', version: info.version })
     try {
-      new Notification({ title: 'harness-desktop', body: `新版本 ${info.version} 已下载，重启应用完成更新。` }).show()
+      new Notification({ title: 'DSH Desktop', body: `新版本 ${info.version} 已下载，重启应用完成更新。` }).show()
     } catch {
       // 通知失败不阻塞
     }
@@ -76,6 +84,19 @@ function setupUpdater() {
     autoUpdater.quitAndInstall()
     return { ok: true }
   })
+
+  // 启动后台检查 + 定时复检：检测 GitHub Release 新版本（v<version> + latest-linux.yml）。
+  // 启动后延迟 15s 检查一次（避开引擎启动峰值），之后每 6 小时复检一次。
+  // 失败静默（error 事件已记录），不打扰用户。
+  const checkUpdates = () => {
+    try {
+      void autoUpdater.checkForUpdates()
+    } catch (err) {
+      console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
+    }
+  }
+  setTimeout(checkUpdates, 15_000)
+  setInterval(checkUpdates, 6 * 60 * 60 * 1000)
 }
 
 /** 创建系统托盘：鲸鱼图标 + 菜单（显示/新建会话/退出）。 */
@@ -101,7 +122,7 @@ function createTray() {
       tray = new Tray(whiteImage)
     }
   }
-  tray.setToolTip('harness-desktop')
+  tray.setToolTip('DSH Desktop')
 
   const showWindow = () => {
     if (mainWindow) {
@@ -161,7 +182,7 @@ function createWindow() {
     height: 780,
     minWidth: 900,
     minHeight: 620,
-    title: 'harness-desktop',
+    title: 'DSH Desktop',
     icon: join(app.getAppPath(), 'build', 'icon.png'),
     backgroundColor: '#0f1115',
     webPreferences: {
@@ -190,7 +211,7 @@ function createWindow() {
     if (!trayHintShown) {
       trayHintShown = true
       try {
-        new Notification({ title: 'harness-desktop', body: '应用已最小化到托盘，点托盘鲸鱼图标恢复。' }).show()
+        new Notification({ title: 'DSH Desktop', body: '应用已最小化到托盘，点托盘鲸鱼图标恢复。' }).show()
       } catch {
         // 通知失败不阻塞
       }
@@ -322,8 +343,9 @@ app.whenReady().then(async () => {
 
   setupMenu()
   // Wayland 下 Electron 会自行推断 XDG app id，推断值通常与安装的 .desktop 文件名
-  // 不一致，导致 dock/任务栏图标对不上（PR #304 实践）。productName=harness-desktop
-  // → electron-builder 生成 harness-desktop.desktop，这里显式对齐。
+  // 不一致，导致 dock/任务栏图标对不上（PR #304 实践）。.desktop 文件名由
+  // electron-builder 按 package.json 的 name（harness-desktop）派生为
+  // harness-desktop.desktop（与 productName "DSH Desktop" 无关），这里显式对齐。
   if (process.platform === 'linux') {
     app.setDesktopName('harness-desktop.desktop')
   }
@@ -339,7 +361,7 @@ app.whenReady().then(async () => {
     if (!trayHintShown) {
       trayHintShown = true
       try {
-        new Notification({ title: 'harness-desktop', body: '应用已在后台运行，点托盘鲸鱼图标打开。' }).show()
+        new Notification({ title: 'DSH Desktop', body: '应用已在后台运行，点托盘鲸鱼图标打开。' }).show()
       } catch {
         // 通知失败不阻塞
       }
