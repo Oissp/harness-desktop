@@ -37,20 +37,79 @@ autoUpdater.allowPrerelease = true
 autoUpdater.channel = 'alpha'
 
 function setupUpdater() {
-  // 打包环境才启用自动更新（dev 模式跳过）；未签名 macOS 构建 updater 不活跃，静默跳过
-  if (app.isPackaged && !autoUpdater.isUpdaterActive()) {
-    console.warn('[harness-desktop] 自动更新不可用（未签名构建，updater 不活跃，静默跳过）')
-    return
+  // updater 是否活跃：仅打包 + 已签名（macOS）/ 正常 Linux 构建时为 true。
+  // dev 模式与未签名构建下为 false —— 此时仍注册 IPC handler（返回 active=false
+  // 并下发 disabled 状态），避免渲染层 invoke 到未注册通道而报原始错误。
+  const active = app.isPackaged && autoUpdater.isUpdaterActive()
+  if (!active) {
+    const reason = app.isPackaged ? '未签名构建，自动更新不可用' : '开发模式，自动更新不可用'
+    console.warn(`[harness-desktop] ${reason}（静默跳过）`)
   }
-  if (!app.isPackaged) return
+
+  // 手动检查的超时兜底：checkForUpdates() 是 fire-and-forget，状态靠 update:status
+  // 事件回流。若网络/registry 静默失败、迟迟不发事件，前端会卡在"检查中…"。
+  // 这里在手动触发后挂一个定时器，收到任一终态/有结果事件即清除；超时则下发 error。
+  let manualCheckTimer: NodeJS.Timeout | null = null
+  const MANUAL_CHECK_TIMEOUT = 25_000
+  const clearManualTimer = () => {
+    if (manualCheckTimer) {
+      clearTimeout(manualCheckTimer)
+      manualCheckTimer = null
+    }
+  }
+
+  ipcMain.handle('update:check', () => {
+    try {
+      if (!active) {
+        mainWindow?.webContents.send('update:status', {
+          state: 'disabled',
+          message: app.isPackaged ? '当前为未签名构建，自动更新不可用' : '开发模式下无法检查更新',
+        })
+        return { ok: true, value: { active: false } }
+      }
+      // 挂超时兜底：到达终态（available/up-to-date/error）的任一事件时由下方监听清除
+      clearManualTimer()
+      manualCheckTimer = setTimeout(() => {
+        manualCheckTimer = null
+        mainWindow?.webContents.send('update:status', {
+          state: 'error',
+          message: '检查更新超时，请稍后重试或检查网络后重试',
+        })
+      }, MANUAL_CHECK_TIMEOUT)
+      void autoUpdater.checkForUpdates()
+      return { ok: true, value: { active: true } }
+    } catch (err) {
+      clearManualTimer()
+      return { ok: false, error: { code: 'update-error', message: (err as Error).message } }
+    }
+  })
+  ipcMain.handle('update:quitAndInstall', () => {
+    if (!active) {
+      return { ok: false, error: { code: 'update-disabled', message: '自动更新不可用' } }
+    }
+    autoUpdater.quitAndInstall()
+    return { ok: true }
+  })
+
+  // updater 不活跃时到此为止：不注册事件监听、不启动定时复检
+  if (!active) return
+
+  // 收到任一"有结果"事件即清除手动检查超时定时器
+  const maybeClearManualTimer = (state: string) => {
+    if (state === 'available' || state === 'up-to-date' || state === 'error' || state === 'downloaded') {
+      clearManualTimer()
+    }
+  }
   autoUpdater.on('checking-for-update', () => {
     mainWindow?.webContents.send('update:status', { state: 'checking' })
   })
   autoUpdater.on('update-available', (info) => {
+    maybeClearManualTimer('available')
     mainWindow?.webContents.send('update:status', { state: 'available', version: info.version })
     // 后台自动下载（autoDownload=true）
   })
   autoUpdater.on('update-not-available', () => {
+    maybeClearManualTimer('up-to-date')
     mainWindow?.webContents.send('update:status', { state: 'up-to-date' })
   })
   autoUpdater.on('download-progress', (p) => {
@@ -60,6 +119,7 @@ function setupUpdater() {
     })
   })
   autoUpdater.on('update-downloaded', (info) => {
+    maybeClearManualTimer('downloaded')
     mainWindow?.webContents.send('update:status', { state: 'downloaded', version: info.version })
     try {
       new Notification({ title: 'DSH Desktop', body: `新版本 ${info.version} 已下载，重启应用完成更新。` }).show()
@@ -68,21 +128,10 @@ function setupUpdater() {
     }
   })
   autoUpdater.on('error', (err) => {
+    maybeClearManualTimer('error')
     // 失败静默（日志记录，不打扰用户）
     console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
     mainWindow?.webContents.send('update:status', { state: 'error', message: err?.message })
-  })
-  ipcMain.handle('update:check', () => {
-    try {
-      void autoUpdater.checkForUpdates()
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: { code: 'update-error', message: (err as Error).message } }
-    }
-  })
-  ipcMain.handle('update:quitAndInstall', () => {
-    autoUpdater.quitAndInstall()
-    return { ok: true }
   })
 
   // 启动后台检查 + 定时复检：检测 GitHub Release 新版本（v<version> + latest-linux.yml）。

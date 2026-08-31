@@ -363,8 +363,10 @@ export interface HarnessApi {
   describe(): Promise<IpcResult<DshStatus>>
 
   // ---- 021 自动更新 ----
-  checkForUpdates(): Promise<IpcResult<unknown>>
+  /** 手动检查更新。value.active=false 表示 updater 不活跃（dev / 未签名构建）。 */
+  checkForUpdates(): Promise<IpcResult<{ active: boolean }>>
   quitAndInstall(): Promise<IpcResult<unknown>>
+  /** 更新状态事件。state: checking|available|downloading|downloaded|up-to-date|error|disabled。 */
   onUpdateStatus(cb: (status: { state: string; version?: string; percent?: number; message?: string }) => void): () => void
 
   listSessions(): Promise<IpcResult<SessionSummary[]>>
