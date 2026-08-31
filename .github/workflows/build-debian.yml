@@ -139,8 +139,9 @@ jobs:
   detect:
     name: Decide release
     needs: sync-dsh
-    # sync-dsh 在 push 触发时被跳过，这里 always() 保证 detect 仍运行
-    if: always()
+    # sync-dsh 在 push 触发时被跳过，这里 !cancelled() 保证 detect 仍运行
+    # （用 !cancelled() 而非 always()：workflow 被手动取消时不白跑决策步骤）。
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
@@ -161,25 +162,34 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "待发布版本: $VERSION"
 
+          # 幂等：v<version> release 已存在则跳过（force 可绕过）
           if [ "$FORCE" = "true" ]; then
             echo "::notice::强制重建模式，跳过已发布检查"
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # 幂等：v<version> release 已存在则跳过
-          if gh release view "v$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            SHOULD_RELEASE=true
+          elif gh release view "v$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "v$VERSION release 已存在，跳过发布"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            SHOULD_RELEASE=false
           else
             echo "v$VERSION release 不存在，继续发布"
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            SHOULD_RELEASE=true
           fi
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+
+          # 决策写入 step summary，Actions UI 直接可见，排查 re-run 时不必下日志
+          {
+            echo "## 发版决策"
+            echo "- 触发: \`${{ github.event_name }}\`"
+            echo "- 版本: \`$VERSION\`"
+            echo "- should_release: \`$SHOULD_RELEASE\`"
+            echo "- sync-dsh: \`${{ needs.sync-dsh.result }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build .deb (Debian 13)
     needs: detect
-    if: needs.detect.outputs.should_release == 'true'
+    # 显式状态门：!cancelled() 让 sync-dsh 被 skip 时不连带跳过本 job；
+    # 再要求 detect 真正成功且 should_release=true，避免拿到空输出误判。
+    if: ${{ !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     container:
       # 用 Debian 13 (trixie) 容器构建，确保产物 glibc/库依赖与 Debian 13 匹配。
@@ -286,7 +296,10 @@ jobs:
   release:
     name: Publish Release
     needs: [sync-dsh, detect, build]
-    if: needs.detect.outputs.should_release == 'true'
+    # 关键：必须用 !cancelled()，否则隐式 success() 会因 sync-dsh 在 push 时
+    # 被 skipped 而判定失败 → release 永远跳过 → push 发版发不出去。
+    # 仅当 build 真正成功且 should_release=true 时才发布。
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.detect.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
