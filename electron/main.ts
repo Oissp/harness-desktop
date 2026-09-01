@@ -54,11 +54,18 @@ autoUpdater.channel = 'alpha'
 // 托盘与 IPC 都走它，保证 disabled/超时/通知逻辑一致。
 let triggerManualUpdateCheck: () => void = () => {}
 
+// 更新已下载待安装：downloaded 后置位，托盘菜单"检查更新"切为"应用更新"。
+// 正常运行时窗口指向官方引擎 UI，桌面 React 侧边栏不可见，托盘是唯一持久入口，
+// 故在此提供"一键应用更新"，免去用户退出应用再重开的绕路。
+let updateReadyVersion: string | null = null
+let updaterActive = false
+
 function setupUpdater() {
   // updater 是否活跃：仅打包 + 已签名（macOS）/ 正常 Linux 构建时为 true。
   // dev 模式与未签名构建下为 false —— 此时仍注册 IPC handler（返回 active=false
   // 并下发 disabled 状态），避免渲染层 invoke 到未注册通道而报原始错误。
   const active = app.isPackaged && autoUpdater.isUpdaterActive()
+  updaterActive = active
   if (!active) {
     const reason = app.isPackaged ? '未签名构建，自动更新不可用' : '开发模式，自动更新不可用'
     console.warn(`[dsh-desktop] ${reason}（静默跳过）`)
@@ -165,8 +172,10 @@ function setupUpdater() {
   autoUpdater.on('update-downloaded', (info) => {
     // downloaded 是重要状态：无论手动/后台都通知（重启提示）
     onResult('downloaded')
+    updateReadyVersion = info.version
+    rebuildTrayMenu()
     mainWindow?.webContents.send('update:status', { state: 'downloaded', version: info.version })
-    notifyUpdate(`新版本 ${info.version} 已下载，重启应用完成更新。`)
+    notifyUpdate(`新版本 ${info.version} 已下载，点托盘"应用更新"完成安装。`)
   })
   autoUpdater.on('error', (err) => {
     onResult('error', `检查更新失败：${(err as Error)?.message ?? '未知错误'}`)
@@ -189,7 +198,49 @@ function setupUpdater() {
   setInterval(checkUpdates, 6 * 60 * 60 * 1000)
 }
 
-/** 创建系统托盘：鲸鱼图标 + 菜单（显示/新建会话/退出）。 */
+/** 显示/恢复主窗口（无窗口则新建）。托盘菜单与单击共用。 */
+function showWindow() {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    createWindow()
+  }
+}
+
+/** 应用已下载的更新并重启。仅在 updater 活跃且有待安装版本时生效。 */
+function applyDownloadedUpdate() {
+  if (!updaterActive || !updateReadyVersion) return
+  autoUpdater.quitAndInstall()
+}
+
+/** 构建托盘右键菜单：更新已下载时"检查更新"切为"应用更新"。 */
+function buildTrayMenu(): Menu {
+  return Menu.buildFromTemplate([
+    { label: '显示主窗口', click: showWindow },
+    {
+      label: '新建会话',
+      click: () => {
+        showWindow()
+        const win = BrowserWindow.getAllWindows()[0]
+        if (win && !win.isDestroyed()) win.webContents.send('menu:new-chat')
+      },
+    },
+    updateReadyVersion
+      ? { label: `应用更新 v${updateReadyVersion}`, click: applyDownloadedUpdate }
+      : { label: '检查更新', click: () => triggerManualUpdateCheck() },
+    { type: 'separator' },
+    { label: '退出', click: () => shutdown() },
+  ])
+}
+
+/** 重建托盘菜单（更新状态变化后切换"检查更新"/"应用更新"）。 */
+function rebuildTrayMenu() {
+  if (tray && !tray.isDestroyed()) tray.setContextMenu(buildTrayMenu())
+}
+
+/** 创建系统托盘：鲸鱼图标 + 菜单（显示/新建会话/检查更新/退出）。 */
 function createTray() {
   const isMac = process.platform === 'darwin'
   const trayDir = join(app.getAppPath(), 'build', 'tray')
@@ -213,35 +264,8 @@ function createTray() {
     }
   }
   tray.setToolTip('DSH Desktop')
-
-  const showWindow = () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-    } else {
-      createWindow()
-    }
-  }
-
-  const menu = Menu.buildFromTemplate([
-    { label: '显示主窗口', click: showWindow },
-    {
-      label: '新建会话',
-      click: () => {
-        showWindow()
-        const win = BrowserWindow.getAllWindows()[0]
-        if (win && !win.isDestroyed()) win.webContents.send('menu:new-chat')
-      },
-    },
-    {
-      label: '检查更新',
-      click: () => triggerManualUpdateCheck(),
-    },
-    { type: 'separator' },
-    { label: '退出', click: () => shutdown() },
-  ])
-  tray.setContextMenu(menu)
+  // 菜单通过 rebuildTrayMenu 设置：若启动时已有待安装更新（极少见）也能正确展示
+  rebuildTrayMenu()
   // 单击托盘图标 → 显示主窗口
   tray.on('click', showWindow)
   return tray
