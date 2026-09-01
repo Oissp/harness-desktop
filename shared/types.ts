@@ -42,6 +42,8 @@ export interface AppSettings {
   evolution?: { autoReview?: boolean; autoInjectMemory?: boolean }
   /** 复盘用的隐藏会话（已归档，不出现在会话列表，复盘不污染聊天）。 */
   reviewSessionId?: string
+  /** 已归档会话的本地元数据（sessionId → 标题/cwd/时间），归档时缓存，供归档分组展示与删除定位。 */
+  archivedSessionMeta?: Record<string, { title?: string; cwd?: string; archivedAt?: number }>
   /** 已生成技能的聚类类型（避免重复生成）。 */
   generatedSkillTypes?: string[]
   /** 外观配置（011）。 */
@@ -156,6 +158,17 @@ export interface SessionSummary {
   cwd?: string
   agentPreset?: string
   planActive?: boolean
+}
+
+/** 已归档会话（来自 workspace.follow baseline 的归一化视图）。 */
+export interface ArchivedSessionInfo {
+  sessionId: string
+  /** 标题：优先取归档时本地缓存的元数据，无则 undefined。 */
+  title?: string
+  /** 工作区路径：从 baseline 的 workspace.sessionIds → path 映射得到，用于删除时定位目录。 */
+  cwd?: string
+  /** 归档时间（本地缓存，可选）。 */
+  archivedAt?: number
 }
 
 /** 一条归一化的消息块。 */
@@ -380,6 +393,8 @@ export interface HarnessApi {
   forkSession(sessionId: string): Promise<IpcResult<{ sessionId: string }>>
   archiveSession(sessionId: string): Promise<IpcResult<{ archivedSessionIds: string[] }>>
   hardDeleteSession(sessionId: string, cwd?: string): Promise<IpcResult<void>>
+  /** 列出已归档会话（workspace.follow baseline：归档 id 集合 + 所属工作区路径）。 */
+  listArchivedSessions(): Promise<IpcResult<ArchivedSessionInfo[]>>
   copyText(text: string): Promise<IpcResult<void>>
 
   listAgentPresets(): Promise<IpcResult<AgentPresetInfo[]>>

@@ -165,6 +165,7 @@ export function registerIpc(
   )
   ipcMain.handle('session:fork', (_e, sessionId: string) => run(() => adapter().forkSession(sessionId)))
   ipcMain.handle('session:archive', (_e, sessionId: string) => run(() => adapter().archiveSession(sessionId)))
+  ipcMain.handle('session:listArchived', () => run(() => adapter().listArchivedSessions()))
 
   // 硬删除：取消(若运行) → 校验日志文件存在 → 删除会话目录
   // 硬删除：先归档（dsh 原生：立即从活跃列表移除，session.list 不再返回），

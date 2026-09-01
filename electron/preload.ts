@@ -39,6 +39,7 @@ const api: HarnessApi = {
   forkSession: (sessionId: string) => call('session:fork', sessionId),
   archiveSession: (sessionId: string) => call('session:archive', sessionId),
   hardDeleteSession: (sessionId: string, cwd?: string) => call('session:hardDelete', sessionId, cwd),
+  listArchivedSessions: () => call('session:listArchived'),
   copyText: (text: string) => call('clipboard:copy', text),
 
   listAgentPresets: () => call('preset:list'),

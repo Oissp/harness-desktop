@@ -130,7 +130,7 @@ export default function SessionContextMenu({
       {view === 'confirm-archive' && (
         <>
           <div className="ctx-title">归档会话？</div>
-          <div className="ctx-note">归档后从列表隐藏，数据保留，可恢复。</div>
+          <div className="ctx-note">归档后从列表隐藏，数据保留；可在侧栏「归档」分组查看或删除。</div>
           <div className="ctx-actions">
             <button className="btn small" onClick={() => setView('main')}>
               取消

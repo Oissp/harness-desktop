@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Desktop Client for DeepSeek Harness",
   "main": "dist-electron/electron/main.js",
   "type": "module",

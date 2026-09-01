@@ -425,6 +425,11 @@ export class DshClient {
     return this.request('workspace/archiveSession', { request: payload })
   }
 
+  /** 打开 workspace/follow 流；首帧为 baseline（含 archivedSessionIds 与各 workspace 的 sessionIds→path）。 */
+  workspaceFollow(): RemoteStream {
+    return this.openStream('workspace/follow', {})
+  }
+
   modelCatalog(): Promise<{
     default: { provider: string; model: string; reasoningEffort?: string }
     routableProviders: string[]

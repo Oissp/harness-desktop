@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SessionSummary } from '../../shared/types'
+import type { ArchivedSessionInfo, SessionSummary } from '../../shared/types'
 import SessionContextMenu from './SessionContextMenu'
 
 interface Props {
   sessions: SessionSummary[]
+  archivedSessions: ArchivedSessionInfo[]
   activeId: string | null
   loading: boolean
   creating: boolean
@@ -21,6 +22,7 @@ interface Props {
   onFork: (id: string) => Promise<boolean>
   onArchive: (id: string) => Promise<boolean>
   onDelete: (id: string, cwd?: string) => Promise<boolean>
+  onDeleteArchived: (id: string, cwd?: string) => Promise<boolean>
   onExport: (id: string) => void
   onCopyId: (id: string) => void
 }
@@ -43,6 +45,7 @@ interface MenuState {
 
 export default function Sidebar({
   sessions,
+  archivedSessions,
   activeId,
   loading,
   creating,
@@ -60,12 +63,15 @@ export default function Sidebar({
   onFork,
   onArchive,
   onDelete,
+  onDeleteArchived,
   onExport,
   onCopyId,
 }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [archivedCollapsed, setArchivedCollapsed] = useState(true)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
 
   const pinnedSet = new Set(pinnedSessionIds)
@@ -188,6 +194,70 @@ export default function Sidebar({
           )
         })}
       </div>
+
+      {archivedSessions.length > 0 && (
+        <div className="archived-group">
+          <button
+            className="archived-header"
+            onClick={() => setArchivedCollapsed((c) => !c)}
+            title={archivedCollapsed ? '展开归档会话' : '收起归档会话'}
+          >
+            <span className="archived-caret">{archivedCollapsed ? '▸' : '▾'}</span>
+            <span className="archived-label">归档</span>
+            <span className="archived-count">{archivedSessions.length}</span>
+          </button>
+          {!archivedCollapsed && (
+            <div className="archived-list">
+              {archivedSessions.map((s) => {
+                const title = s.title || `归档会话 ${s.sessionId.slice(0, 6)}`
+                const confirming = confirmDeleteId === s.sessionId
+                return (
+                  <div key={s.sessionId} className="archived-row">
+                    {confirming ? (
+                      <>
+                        <span className="archived-confirm-text">确认删除？</span>
+                        <span className="archived-confirm-actions">
+                          <button
+                            className="archived-confirm-btn danger"
+                            onClick={() => {
+                              setConfirmDeleteId(null)
+                              void onDeleteArchived(s.sessionId, s.cwd)
+                            }}
+                          >
+                            删除
+                          </button>
+                          <button
+                            className="archived-confirm-btn"
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            取消
+                          </button>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="archived-title" title={title}>
+                          {title}
+                        </span>
+                        <button
+                          className="archived-delete-btn"
+                          title="删除归档会话"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmDeleteId(s.sessionId)
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sidebar-footer">
         <button className="settings-btn" onClick={onOpenSettings} title="设置">

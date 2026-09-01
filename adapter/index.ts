@@ -9,6 +9,7 @@ import { normalizeControlFrame, normalizeFollowFrame, normalizeHistory } from '.
 import type { DshEvent } from './events.js'
 import type {
   AgentPresetInfo,
+  ArchivedSessionInfo,
   CredentialStatus,
   CustomProviderConfig,
   CustomProviderListItem,
@@ -191,6 +192,43 @@ export class DshAdapter {
 
   archiveSession(sessionId: string): Promise<{ archivedSessionIds: string[] }> {
     return this.client.archiveSession({ sessionId })
+  }
+
+  /**
+   * 拉取已归档会话：打开 workspace/follow 流，读首帧 baseline 后取消。
+   * baseline.archivedSessionIds 即归档集合；各 workspace.sessionIds → path 映射给出 cwd（用于删除定位）。
+   * 归档是持久的显示过滤器，会话数据仍在磁盘原位，故可通过 workspace 归属定位其目录。
+   */
+  async listArchivedSessions(): Promise<ArchivedSessionInfo[]> {
+    const stream = this.client.workspaceFollow()
+    let baseline: Record<string, unknown> | null = null
+    try {
+      const first = (await stream.first()) as Record<string, unknown> | null | undefined
+      if (first && first.type === 'baseline') baseline = (first.value as Record<string, unknown>) ?? null
+    } finally {
+      stream.onItem = null
+      this.client.muxCancel(stream)
+    }
+    if (!baseline) return []
+    const archivedIds = (baseline.archivedSessionIds as unknown[] | undefined) ?? []
+    // 构建 sessionId → workspace.path 映射（归档会话仍保留在其 workspace 的 sessionIds 中）
+    const cwdBySession = new Map<string, string>()
+    const items = (baseline.items as unknown[] | undefined) ?? []
+    for (const w of items) {
+      const ws = w as Record<string, unknown>
+      const path = typeof ws.path === 'string' ? ws.path : undefined
+      const ids = (ws.sessionIds as unknown[] | undefined) ?? []
+      if (!path) continue
+      for (const id of ids) {
+        if (typeof id === 'string') cwdBySession.set(id, path)
+      }
+    }
+    return archivedIds
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((sessionId) => ({
+        sessionId,
+        cwd: cwdBySession.get(sessionId),
+      }))
   }
 
   // ---- Agent 预设（模式） ----

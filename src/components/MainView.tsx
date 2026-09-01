@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppSettings, DshStatus, SessionSummary, TaskRecord } from '../../shared/types'
+import type { AppSettings, ArchivedSessionInfo, DshStatus, SessionSummary, TaskRecord } from '../../shared/types'
 import { subscribeAll } from '../bus'
 import { TaskStore } from '../tasks'
 import Brand from './Brand'
@@ -26,6 +26,7 @@ export default function MainView({
   onSessionListTick,
 }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [archivedSessions, setArchivedSessions] = useState<ArchivedSessionInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loadingList, setLoadingList] = useState(true)
@@ -221,6 +222,31 @@ export default function MainView({
     void refreshSessions()
   }, [sessionListVersion])
 
+  // 归档分组：从 workspace.follow baseline 拉取归档会话，叠加本地缓存的标题/cwd 元数据
+  const archivedMeta = appSettings.archivedSessionMeta ?? {}
+  const refreshArchived = useCallback(async () => {
+    const res = await harness.listArchivedSessions()
+    if (!res.ok) return
+    const reviewId = appSettings.reviewSessionId
+    setArchivedSessions(
+      res
+        .value!.filter((s) => s.sessionId !== reviewId)
+        .map((s) => {
+          const meta = archivedMeta[s.sessionId]
+          return {
+            sessionId: s.sessionId,
+            title: meta?.title,
+            cwd: s.cwd ?? meta?.cwd,
+            archivedAt: meta?.archivedAt,
+          }
+        }),
+    )
+  }, [archivedMeta, appSettings.reviewSessionId])
+
+  useEffect(() => {
+    void refreshArchived()
+  }, [refreshArchived])
+
   // 会话 running 状态即时更新（无需等 session.list 往返），让侧边栏转圈即时生效
   const runningTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   useEffect(() => {
@@ -349,14 +375,43 @@ export default function MainView({
 
   const archiveSession = useCallback(
     async (sessionId: string) => {
+      // 归档前缓存标题/cwd 到本地元数据（session.list 归档后不再返回，标题无处可查）
+      const s = sessions.find((x) => x.sessionId === sessionId)
+      if (s) {
+        const meta = appSettings.archivedSessionMeta ?? {}
+        await onUpdateSettings({
+          archivedSessionMeta: {
+            ...meta,
+            [sessionId]: { title: s.title, cwd: s.cwd, archivedAt: Date.now() },
+          },
+        })
+      }
       const res = await harness.archiveSession(sessionId)
       if (res.ok) {
         setActiveId((cur) => (cur === sessionId ? null : cur))
         await refreshSessions()
+        await refreshArchived()
       }
       return res.ok
     },
-    [refreshSessions],
+    [sessions, appSettings.archivedSessionMeta, onUpdateSettings, refreshSessions, refreshArchived],
+  )
+
+  const deleteArchivedSession = useCallback(
+    async (sessionId: string, cwd?: string) => {
+      const res = await harness.hardDeleteSession(sessionId, cwd)
+      if (!res.ok) return false
+      // 清理本地元数据并刷新归档列表
+      const meta = appSettings.archivedSessionMeta ?? {}
+      if (meta[sessionId]) {
+        const next = { ...meta }
+        delete next[sessionId]
+        await onUpdateSettings({ archivedSessionMeta: next })
+      }
+      await refreshArchived()
+      return true
+    },
+    [appSettings.archivedSessionMeta, onUpdateSettings, refreshArchived],
   )
 
   const hardDeleteSession = useCallback(
@@ -387,6 +442,7 @@ export default function MainView({
       <div className="app-body">
         <Sidebar
           sessions={displaySessions}
+          archivedSessions={archivedSessions}
           activeId={activeId}
           loading={loadingList}
           creating={creating}
@@ -400,6 +456,7 @@ export default function MainView({
           onRefresh={() => {
             setLoadingList(true)
             void refreshSessions()
+            void refreshArchived()
           }}
           onRename={renameSession}
           onTogglePin={togglePin}
@@ -407,6 +464,7 @@ export default function MainView({
           onFork={forkSession}
           onArchive={archiveSession}
           onDelete={hardDeleteSession}
+          onDeleteArchived={deleteArchivedSession}
           onExport={exportSession}
           onCopyId={copySessionId}
         />
