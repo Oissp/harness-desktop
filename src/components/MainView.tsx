@@ -222,30 +222,33 @@ export default function MainView({
     void refreshSessions()
   }, [sessionListVersion])
 
-  // 归档分组：从 workspace.follow baseline 拉取归档会话，叠加本地缓存的标题/cwd 元数据
-  const archivedMeta = appSettings.archivedSessionMeta ?? {}
+  // 归档分组：从 workspace.follow baseline 拉取归档会话（仅 sessionId + cwd）
   const refreshArchived = useCallback(async () => {
     const res = await harness.listArchivedSessions()
     if (!res.ok) return
     const reviewId = appSettings.reviewSessionId
-    setArchivedSessions(
-      res
-        .value!.filter((s) => s.sessionId !== reviewId)
-        .map((s) => {
-          const meta = archivedMeta[s.sessionId]
-          return {
-            sessionId: s.sessionId,
-            title: meta?.title,
-            cwd: s.cwd ?? meta?.cwd,
-            archivedAt: meta?.archivedAt,
-          }
-        }),
-    )
-  }, [archivedMeta, appSettings.reviewSessionId])
+    setArchivedSessions(res.value!.filter((s) => s.sessionId !== reviewId))
+  }, [appSettings.reviewSessionId])
 
   useEffect(() => {
     void refreshArchived()
   }, [refreshArchived])
+
+  // 归档会话标题/cwd 合并本地元数据（refreshArchived 只拉 sessionId，标题归档后无处可查故读缓存）
+  const archivedMeta = appSettings.archivedSessionMeta
+  const archivedDisplay = useMemo(
+    () =>
+      archivedSessions.map((s) => {
+        const meta = archivedMeta?.[s.sessionId]
+        return {
+          sessionId: s.sessionId,
+          title: meta?.title,
+          cwd: s.cwd ?? meta?.cwd,
+          archivedAt: meta?.archivedAt,
+        }
+      }),
+    [archivedSessions, archivedMeta],
+  )
 
   // 会话 running 状态即时更新（无需等 session.list 往返），让侧边栏转圈即时生效
   const runningTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -442,7 +445,7 @@ export default function MainView({
       <div className="app-body">
         <Sidebar
           sessions={displaySessions}
-          archivedSessions={archivedSessions}
+          archivedSessions={archivedDisplay}
           activeId={activeId}
           loading={loadingList}
           creating={creating}
