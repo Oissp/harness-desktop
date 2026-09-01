@@ -344,23 +344,20 @@ jobs:
           body: |
             ## DSH Desktop ${{ needs.detect.outputs.version }}
 
-            ### 产物
-            - `dsh-desktop_*.deb` — Debian 13 (trixie) / amd64
-            - `latest-linux.yml` — electron-updater 自动更新元数据（版本号 / 下载地址 / sha512）
-
             ### 安装
             ```bash
             sudo dpkg -i dsh-desktop_*.deb
             ```
 
+            ### 产物
+            | 文件 | 用途 |
+            |------|------|
+            | `dsh-desktop_*.deb` | Debian 13 (trixie) / amd64 |
+            | `latest-linux.yml` | electron-updater 自动更新元数据 |
+
             ### 说明
-            - Debian 13 / amd64 产物；已内置 DeepSeek Harness 引擎
-            - 回归单测结果见对应 Workflow run
-            - **v1.0.1 起包名由 `harness-desktop` 改为 `dsh-desktop`**：从 1.0.0 自动更新安装的是新包，旧包需手动卸载：
-              ```bash
-              sudo apt remove harness-desktop
-              ```
-            - **v1.0.4 起配置目录从 `~/.config/harness-desktop/` 迁移到 `~/.config/dsh-desktop/`**：首次启动自动搬迁，无需手动操作
+            - 已内置 DeepSeek Harness 引擎，回归单测结果见对应 Workflow run
+            - 首次启动自动从 `~/.config/harness-desktop/` 迁移配置到 `~/.config/dsh-desktop/`
           # 连同 latest-linux.yml / blockmap 一起上传，缺 yml 则桌面端检查更新失败
           files: |
             release-assets/*.deb
