@@ -8,6 +8,7 @@ import { DshManager } from './dsh-manager.js'
 import { SettingsStore } from './settings-store.js'
 import { registerIpc } from './ipc.js'
 import { createCredentialStore, userDataDir } from './credential-store.js'
+import { migrateUserData } from './migrate-userdata.js'
 import updaterModule from 'electron-updater'
 // electron-updater 是 CJS；ESM 下具名导出互操作不可靠，取 default 对象的 autoUpdater
 const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-updater')['autoUpdater'] }
@@ -15,10 +16,18 @@ const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
-// package.json name 由 harness-desktop 改为 dsh-desktop（重命名），但 Electron 默认从
-// app 名派生 userData 路径（~/.config/<name> 等）。锁定为历史名，避免已安装用户升级后
-// app.getPath('userData') 换目录，丢失设置、凭据与 dsh 引擎 home（会话/记忆）。
-app.setName('harness-desktop')
+// userData 路径迁移：旧版用 app.setName('harness-desktop') 锁定路径，现已改为
+// 启动时一次性搬迁数据到 Electron 自然路径（~/.config/dsh-desktop/）。
+// 必须在 whenReady 前、模块级顶层调用（此时 app.getPath 已可用）。
+{
+  const newUserData = app.getPath('userData') // 自然路径：~/.config/dsh-desktop/
+  const configBase = dirname(newUserData)
+  migrateUserData(newUserData, [
+    join(configBase, 'harness-desktop'),
+    join(configBase, 'DSH Desktop', 'harness-desktop'),
+    join(configBase, 'DSH Desktop'),
+  ])
+}
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -52,7 +61,7 @@ function setupUpdater() {
   const active = app.isPackaged && autoUpdater.isUpdaterActive()
   if (!active) {
     const reason = app.isPackaged ? '未签名构建，自动更新不可用' : '开发模式，自动更新不可用'
-    console.warn(`[harness-desktop] ${reason}（静默跳过）`)
+    console.warn(`[dsh-desktop] ${reason}（静默跳过）`)
   }
 
   // 手动检查的超时兜底：checkForUpdates() 是 fire-and-forget，状态靠 update:status
@@ -162,7 +171,7 @@ function setupUpdater() {
   autoUpdater.on('error', (err) => {
     onResult('error', `检查更新失败：${(err as Error)?.message ?? '未知错误'}`)
     // 失败静默（日志记录，不打扰用户）
-    console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
+    console.warn('[dsh-desktop] 检查更新失败:', (err as Error)?.message ?? err)
     mainWindow?.webContents.send('update:status', { state: 'error', message: err?.message })
   })
 
@@ -173,7 +182,7 @@ function setupUpdater() {
     try {
       void autoUpdater.checkForUpdates()
     } catch (err) {
-      console.warn('[harness-desktop] 检查更新失败:', (err as Error)?.message ?? err)
+      console.warn('[dsh-desktop] 检查更新失败:', (err as Error)?.message ?? err)
     }
   }
   setTimeout(checkUpdates, 15_000)
@@ -339,7 +348,7 @@ function loadEngineUI(port: number, token: string | null) {
     if (!mainWindow || mainWindow.isDestroyed()) return
     if (loadedEnginePort !== port) return
     void mainWindow.loadURL(url).catch((err) => {
-      console.warn('[harness-desktop] 加载官方 UI 失败:', (err as Error)?.message ?? err)
+      console.warn('[dsh-desktop] 加载官方 UI 失败:', (err as Error)?.message ?? err)
       if (loadedEnginePort === port) loadedEnginePort = null
       // 递增重试：1s/2s/5s/... 最多 10 次，避免窗口永停回退屏
       attempt += 1
@@ -453,7 +462,7 @@ app.whenReady().then(async () => {
   void manager.start().then((s) => {
     if (s.port) loadEngineUI(s.port, manager.token)
   }).catch((err) => {
-    console.error('[harness-desktop] dsh 启动失败:', err)
+    console.error('[dsh-desktop] dsh 启动失败:', err)
   })
 
   // 端口跟随：引擎崩溃重启换端口 → 窗口重新 loadURL 新端口（A0 端口漂移）

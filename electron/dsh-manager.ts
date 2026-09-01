@@ -176,7 +176,7 @@ export class DshManager {
       try {
         this.eventUnsubs.push(adapter.onSessionEvent(cb))
       } catch (err) {
-        console.error('[harness-desktop] 事件订阅接入失败:', err)
+        console.error('[dsh-desktop] 事件订阅接入失败:', err)
       }
     }
   }
@@ -241,7 +241,7 @@ export class DshManager {
       await this.stop()
       checkProfile(this.dshHome, app.getAppPath())
     } else if (setup.status === 'skip') {
-      console.warn('[harness-desktop] 记忆插件不可用（非致命）:', setup.reason)
+      console.warn('[dsh-desktop] 记忆插件不可用（非致命）:', setup.reason)
     }
 
     // 守护瀑布：boot 前拍配置快照（失败时可回滚到 last-good）
@@ -249,7 +249,7 @@ export class DshManager {
     try {
       takeBootSnapshot(this.dshHome)
     } catch (err) {
-      console.warn('[harness-desktop] 配置快照失败，跳过守护瀑布:', err)
+      console.warn('[dsh-desktop] 配置快照失败，跳过守护瀑布:', err)
     }
 
     await this.spawn()
@@ -259,7 +259,7 @@ export class DshManager {
       // 第一层失败：尝试回滚坏配置后重试一次（对应守护瀑布第二层）
       const restored = restoreFromLastGood(this.dshHome)
       if (restored > 0) {
-        console.warn('[harness-desktop] 检测到坏配置，已从最后良好快照回滚，重试启动…')
+        console.warn('[dsh-desktop] 检测到坏配置，已从最后良好快照回滚，重试启动…')
         // 先停止第一次的子进程：waitUntilReady 超时意味着子进程可能仍存活，
         // 直接再 spawn 会孤儿第一个进程，且其 exit handler 会回写 this.proc
         // 竞态破坏第二个进程的生命周期状态
@@ -432,7 +432,7 @@ export class DshManager {
             promoteToLastGood(this.dshHome)
           } catch (err) {
             // 快照提升失败不 crash 主进程（磁盘满/目录被删等），仅记录
-            console.warn('[harness-desktop] 提升最后良好快照失败:', err)
+            console.warn('[dsh-desktop] 提升最后良好快照失败:', err)
           }
           this.stableTimer = null
         }, STABLE_BOOT_MS)

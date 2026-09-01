@@ -34,7 +34,7 @@ describe('patch-engine', () => {
       expect(result).toBe('applied')
       const content = readFileSync(spec.file, 'utf8')
       expect(content).toContain('const x = 2')
-      expect(content).toContain('@harness-desktop-patch:p1')
+      expect(content).toContain('@dsh-desktop-patch:p1')
     })
 
     it('第二次 apply 返回 skipped，文件不变', () => {

@@ -114,7 +114,7 @@ export class ReminderManager {
         const ok = firedOk.includes(r.id)
         const failures = ok ? 0 : (r.consecutiveFailures ?? 0) + 1
         if (!ok && failures > MAX_RETRIES) {
-          console.warn(`[harness-desktop] 周期提醒 ${r.id} 连续失败 ${MAX_RETRIES} 次，丢弃`)
+          console.warn(`[dsh-desktop] 周期提醒 ${r.id} 连续失败 ${MAX_RETRIES} 次，丢弃`)
           continue
         }
         const nextAt =
@@ -130,7 +130,7 @@ export class ReminderManager {
         if (retries <= MAX_RETRIES) {
           remaining.push({ ...r, nextAt: now + RETRY_DELAY_MS, retries })
         } else {
-          console.warn(`[harness-desktop] 提醒 ${r.id} 重试 ${MAX_RETRIES} 次仍失败，丢弃`)
+          console.warn(`[dsh-desktop] 提醒 ${r.id} 重试 ${MAX_RETRIES} 次仍失败，丢弃`)
         }
       }
       // 一次性提醒成功（firedOk）→ 不再保留

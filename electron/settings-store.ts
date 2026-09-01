@@ -58,7 +58,7 @@ export class SettingsStore {
       const broken = `${this.file}.broken-${Date.now()}`
       try {
         renameSync(this.file, broken)
-        console.warn(`[harness-desktop] 设置文件损坏，已隔离到 ${broken}，使用默认值继续`)
+        console.warn(`[dsh-desktop] 设置文件损坏，已隔离到 ${broken}，使用默认值继续`)
       } catch {
         // 隔离失败不阻断（尽力而为）
       }

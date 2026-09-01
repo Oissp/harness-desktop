@@ -60,7 +60,7 @@ export function createCredentialStore(userDataDir: string) {
   /** 加密一个值存盘。返回是否成功。 */
   function set(ref: string, plain: string): boolean {
     if (!isAvailable()) {
-      console.warn(`[harness-desktop] safeStorage 不可用，凭证 ${ref} 未加密存储（仅引擎侧明文）`)
+      console.warn(`[dsh-desktop] safeStorage 不可用，凭证 ${ref} 未加密存储（仅引擎侧明文）`)
       return false
     }
     const all = readAll()

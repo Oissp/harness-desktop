@@ -16,7 +16,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 
 /** 幂等标记前缀（写入被补丁文件，检测已打补丁）。 */
-const PATCH_MARKER_PREFIX = '// @harness-desktop-patch:'
+const PATCH_MARKER_PREFIX = '// @dsh-desktop-patch:'
 
 /** 一个补丁规格。 */
 export interface PatchSpec {

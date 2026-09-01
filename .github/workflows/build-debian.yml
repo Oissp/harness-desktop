@@ -360,6 +360,7 @@ jobs:
               ```bash
               sudo apt remove harness-desktop
               ```
+            - **v1.0.4 起配置目录从 `~/.config/harness-desktop/` 迁移到 `~/.config/dsh-desktop/`**：首次启动自动搬迁，无需手动操作
           # 连同 latest-linux.yml / blockmap 一起上传，缺 yml 则桌面端检查更新失败
           files: |
             release-assets/*.deb

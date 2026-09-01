@@ -46,7 +46,7 @@ function pluginTargetDir(dshHome: string, name: string): string {
 function installOne(dshHome: string, appPath: string, name: string): boolean {
   const src = pluginSourceDir(appPath, name)
   if (!existsSync(join(src, 'index.js'))) {
-    console.warn(`[harness-desktop] 插件 ${name} 源码缺失，跳过`)
+    console.warn(`[dsh-desktop] 插件 ${name} 源码缺失，跳过`)
     return false
   }
   const target = pluginTargetDir(dshHome, name)
@@ -65,7 +65,7 @@ function installOne(dshHome: string, appPath: string, name: string): boolean {
     }
     return true
   } catch (err) {
-    console.error(`[harness-desktop] 安装插件 ${name} 失败:`, err)
+    console.error(`[dsh-desktop] 安装插件 ${name} 失败:`, err)
     return false
   }
 }
