@@ -307,6 +307,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 拉取完整历史 + 标签：生成 changelog 需要 git log 到上一个 tag
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Apply bumped source (for commit)
         if: needs.sync-dsh.result == 'success' && needs.sync-dsh.outputs.bumped == 'true'
@@ -323,6 +327,27 @@ jobs:
 
       - name: Show release assets
         run: ls -lh release-assets/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 从上一个 tag 到 HEAD 的提交生成 changelog。
+          # git describe --tags --abbrev=0 返回最近可达 tag（当前版本 tag 尚未创建，
+          # 故返回上一个发版 tag）。若无历史 tag（首次发版）则取全部提交。
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            echo "上一个 tag: $PREV_TAG"
+            LOG=$(git log --no-merges --pretty=format:"- %s" "$PREV_TAG"..HEAD)
+          else
+            echo "无历史 tag，取全部提交"
+            LOG=$(git log --no-merges --pretty=format:"- %s")
+          fi
+          # 多行输出通过 GITHUB_ENV 注入，避免被压成一行
+          {
+            echo "body<<EOF"
+            echo "$LOG"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Commit dsh sync bump
         if: needs.sync-dsh.result == 'success' && needs.sync-dsh.outputs.bumped == 'true'
@@ -343,6 +368,9 @@ jobs:
           name: DSH Desktop ${{ needs.detect.outputs.version }}
           body: |
             ## DSH Desktop ${{ needs.detect.outputs.version }}
+
+            ### 变更
+            ${{ env.body }}
 
             ### 安装
             ```bash
