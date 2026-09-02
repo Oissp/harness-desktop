@@ -1,57 +1,64 @@
-# DSH Desktop — DeepSeek Harness 桌面端
+# DSH Desktop
 
-> 下载、安装、双击即聊——无需终端，无需配环境。内置 DeepSeek Harness 引擎，官方 Web UI 套上原生桌面壳。
+DSH Desktop 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Debian 桌面客户端。应用内置 dsh 引擎，启动后直接加载官方 Web UI；Electron 负责本地运行时、凭证保护、托盘、自动更新和桌面扩展。
 
-![splash](assets/screenshots/splash.png)
+> 非 DeepSeek 官方产品，与 DeepSeek 无附属关系。
 
-![main](assets/screenshots/main.png)
+![DSH Desktop](assets/screenshots/dsh-desktop.png)
 
 ## 功能
 
-- **开箱即用**：内置 dsh 引擎，装完即聊；首启 4 步向导 3 分钟上手
-- **流式聊天**：打字机输出 + 思考过程可视化
-- **任务面板**：任务追踪 / 自动复盘 / 失败重试
-- **Agent 进化**：记忆自动沉淀 + 同类任务自动提炼技能
-- **彩色外观**：深 / 浅 / 跟随系统 × 4 种主题色，字体 / 密度可调，即时生效
-- **自动更新**：启动后台检查 + 手动检查，新版本自动下载，重启即更新
-- **安全**：严格 CSP / 单实例锁 / safeStorage 密钥加密 / 托盘常驻
+- 内置 dsh 引擎，首次初始化后可直接使用
+- 官方 Web UI，支持流式回复、思考过程、工作区、模型和会话管理
+- 本地桌面能力：首启向导、任务与记忆管理、提醒、外观设置和归档会话查看
+- 凭证通过 Electron `safeStorage` 加密保存；启用 CSP、导航限制和单实例锁
+- 托盘常驻、后台更新检查和下载后安装
+- 仅发布 Debian 13 / amd64 `.deb` 安装包
 
 ## 安装
 
-**Debian 13 / amd64**：[GitHub Releases](https://github.com/Oissp/harness-desktop/releases)
+从项目的 GitHub Releases 下载 `dsh-desktop_<version>_amd64.deb`，然后执行：
 
 ```bash
-sudo dpkg -i dsh-desktop_*.deb
+sudo apt install ./dsh-desktop_<version>_amd64.deb
 ```
 
-首启：4 步向导（欢迎 → API Key → 工作区 → 完成）。API Key 于 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 获取。
-
-> 无安装包可用开发模式：`pnpm install && pnpm dev`
+首次启动会初始化 dsh Web profile，时间取决于本机网络与依赖缓存。随后在首启向导或设置中配置模型凭证。
 
 ## 开发
 
+要求：Node.js `>=22.19.0`、pnpm `>=9`。项目使用 pnpm 11；推荐通过 Corepack 管理。
+
 ```bash
-pnpm install      # Node >=22.19, pnpm >=9
-pnpm dev          # vite + electron（HMR）
-pnpm build        # 构建 renderer + main
-pnpm test         # Vitest
-pnpm typecheck    # TS 类型检查
-pnpm dist         # 打包 .deb（amd64 → out/）
+corepack enable
+pnpm install
+pnpm dev
 ```
 
-## 技术栈
+常用命令：
 
-- **引擎**：DeepSeek Harness `@deepseek-ai/dsh`
-- **桌面壳**：Electron 43（Linux 产物钉 42.9.3）+ electron-builder
-- **前端**：React 18 + TypeScript + Vite（手写 CSS，无重型 UI 库）
-- **隔离层**：`adapter/` 封装 dsh API，上游变更只改 adapter，renderer 永不见 dsh 原始字段
+```bash
+pnpm typecheck       # 检查 renderer 与 Electron 两个 TypeScript 项目
+pnpm test            # 运行 Vitest
+pnpm build           # 构建 renderer 与 Electron 主进程
+pnpm dist            # 构建 Debian amd64 .deb 到 out/
+```
 
-发版由 `package.json` 的 `version` 驱动；CI 同时每日检测 dsh 上游 npm 版本并 patch-bump。仅构建 Debian 13 / amd64 `.deb`，安装包约 130–230MB。
+`pnpm dev` 会启动 Vite（5173）与 Electron。正式应用界面由本地 dsh Web 服务提供；Vite 页面用于启动、首启向导和引擎故障回退。
+
+## 架构
+
+```
+React fallback UI (src/) -> preload -> IPC -> Electron main -> adapter -> dsh web engine
+```
+
+- `adapter/`：dsh JSON-RPC / WebSocket 协议适配与事件归一化
+- `shared/`：renderer 与主进程共享的稳定类型和 IPC 契约
+- `electron/`：引擎生命周期、IPC、凭证、profile、托盘、更新和桌面桥接
+- `plugins/harness-memory/`：随 profile 安装的本地记忆插件
+
+历史交付记录保存在 [docs/history/](docs/history/)。
 
 ## License
 
 [MIT](LICENSE)
-
----
-
-*非 DeepSeek 官方产品，与 DeepSeek 无附属关系；DeepSeek Harness 为 [DeepSeek AI](https://deepseek.com) 的开源项目。*

@@ -1,47 +1,40 @@
-# 打包体积审计（harness-desktop）
+# Debian 安装包体积说明
 
-> 目标：分析安装包体积构成，找出可安全裁剪项。不砍原生模块（node-pty/koffi）与 dsh 引擎（核心必需）。
+> 目标：在不破坏 dsh 引擎和原生依赖加载的前提下，控制 Debian amd64 `.deb` 的体积。
 
-## 当前状态（修复前）
+## 当前打包方式
 
-| 项 | 大小 | 说明 |
-|---|---|---|
-| 整个 .app | ~1.2 GB | 含 Electron 框架 + 全量 node_modules |
-| Electron Framework.framework | 274 MB | 运行时框架（必需，不可裁） |
-| app/node_modules | 987 MB | **全量复制，含大量 devDependencies（大头）** |
+发布目标仅为 Debian 13 / amd64。`pnpm dist` 会构建 renderer 和 Electron 主进程，再通过 electron-builder 输出 `.deb` 到 `out/`。
 
-### app/node_modules 体积构成（修复前）
+dsh 依赖闭包不能交给 electron-builder 的默认依赖收集：在 pnpm 环境下，它可能遗漏 `@deepseek-ai/*` 的传递依赖，导致打包后的引擎无法启动。因此 `scripts/after-pack.mjs` 会：
 
-| 包 | 大小 | 能否裁 |
-|---|---|---|
-| `electron` | 296 MB | 可裁：开发依赖，运行时不需要（已排除） |
-| `app-builder-bin` | 207 MB | 可裁：electron-builder 构建工具，运行时不需要（已排除） |
-| `node-pty` | 62 MB | 不裁：原生模块，dsh 工具必需 |
-| `@deepseek-ai/*` | 30 MB | 不裁：dsh 引擎依赖闭包，必需 |
-| `@opentelemetry` | 28 MB | 观察 dsh 是否引用；未确认前保留 |
-| `@mistralai` / `openai` | 40 MB | dsh 供应商 SDK（LLM 路由用），保留 |
-| `typescript` | 23 MB | 可裁：构建工具（已排除） |
-| `esbuild` | 9.6 MB | 可裁：构建工具（已排除） |
-| `7zip-bin` / `7zip` | 12 MB | 可裁：打包工具（已排除） |
-| 其余传递依赖 | ~150 MB | dsh 运行时闭包，保留 |
+1. 复制扁平化 `node_modules` 中的运行时依赖
+2. 排除 `package.json` 中列出的开发依赖和构建工具
+3. 排除非目标平台/架构的原生预构建包
+4. 验证目标平台的 koffi 原生二进制实际存在于产物
 
-## 修复内容
+## 必须保留的内容
 
-`scripts/after-pack.mjs` 复制 node_modules 时**排除 devDependencies 与构建工具链**：
+- `@deepseek-ai/*` 及其运行时依赖闭包
+- `node-pty`、`koffi` 等原生模块
+- `vendor/node/` 中由构建流程准备的独立 Node 运行时
+- `plugins/` 和 dsh Web profile 初始化所需文件
 
-- 排除：`electron` / `electron-builder` / `typescript` / `vite` / `vitest` / `concurrently` /
-  `cross-env` / `wait-on` / `@types/*` / `@vitejs/plugin-react` / `app-builder-bin` /
-  `7zip-bin` / `esbuild` / `electron-builder-binaries`
-- 保留：`node-pty` / `koffi` / `@deepseek-ai/*` / 全部运行时依赖
+`asar: false` 同样是必需设置：profile 初始化会创建符号链接，需要真实文件系统路径。
 
-## 预估收益
+## 不应进入产物的内容
 
-- 裁剪前 ~987 MB node_modules → 裁剪后约 350-400 MB（省掉 electron 296M + builder 220M + TS/esbuild ~33M）
-- 整体 .app 从 ~1.2 GB → 约 650-700 MB；dmg 约 400-450 MB
-- 更激进（不裁核心时）：可进一步清理 `@opentelemetry`（若 dsh 未用）、`@img` 平台二进制
+`after-pack.mjs` 会排除开发与构建工具，例如 Electron 开发运行时、electron-builder、TypeScript、Vite、Vitest、类型定义和打包辅助二进制。不要通过“只复制少量依赖”的方式进一步裁剪，除非已经验证 dsh 在打包产物中可以启动。
 
-## 后续建议
+## 验证
 
-1. **验证**：裁剪后 `pnpm dist` 产物必须能正常启动（dsh 引擎依赖闭包完整）——重点测 dsh 引擎加载
-2. **按平台裁剪**：`@img/*` 平台特定二进制、`@rollup` wasm 等可只留当前平台
-3. **渐进式**：每次裁剪后跑 `pnpm test` + 打包启动验证，避免为体积破坏功能
+每次修改依赖、`after-pack.mjs`、Electron 版本或打包配置后，至少执行：
+
+```bash
+pnpm test
+pnpm build
+pnpm dist
+node scripts/verify-deb.mjs
+```
+
+CI 还会校验 `.deb` 控制信息和 `out/latest-linux.yml`。实际体积会随 `@deepseek-ai/dsh`、Electron 与原生模块版本变化；以每次构建的 `out/` 产物为准，不在文档中维护与当前发布目标无关的旧平台估算值。
