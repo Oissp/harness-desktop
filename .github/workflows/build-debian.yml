@@ -371,21 +371,6 @@ jobs:
 
             ### 变更
             ${{ env.body }}
-
-            ### 安装
-            ```bash
-            sudo dpkg -i dsh-desktop_*.deb
-            ```
-
-            ### 产物
-            | 文件 | 用途 |
-            |------|------|
-            | `dsh-desktop_*.deb` | Debian 13 (trixie) / amd64 |
-            | `latest-linux.yml` | electron-updater 自动更新元数据 |
-
-            ### 说明
-            - 已内置 DeepSeek Harness 引擎，回归单测结果见对应 Workflow run
-            - 首次启动自动从 `~/.config/harness-desktop/` 迁移配置到 `~/.config/dsh-desktop/`
           # 连同 latest-linux.yml / blockmap 一起上传，缺 yml 则桌面端检查更新失败
           files: |
             release-assets/*.deb
