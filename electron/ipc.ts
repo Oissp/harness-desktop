@@ -165,7 +165,23 @@ export function registerIpc(
   )
   ipcMain.handle('session:fork', (_e, sessionId: string) => run(() => adapter().forkSession(sessionId)))
   ipcMain.handle('session:archive', (_e, sessionId: string) => run(() => adapter().archiveSession(sessionId)))
-  ipcMain.handle('session:listArchived', () => run(() => adapter().listArchivedSessions()))
+  ipcMain.handle('session:listArchived', () =>
+    run(async () => {
+      const list = await adapter().listArchivedSessions()
+      // 合并本地归档元数据（标题/归档时间）：adapter 只返回引擎的归档 ID 列表，
+      // 标题等桌面端缓存的额外信息需从 app-settings.json 读取后合并。
+      const state = settings.get()
+      const meta = state.archivedSessionMeta ?? {}
+      return list.map((item) => {
+        const cached = meta[item.sessionId]
+        return {
+          ...item,
+          title: cached?.title,
+          archivedAt: cached?.archivedAt,
+        }
+      })
+    }),
+  )
 
   // 硬删除：取消(若运行) → 校验日志文件存在 → 删除会话目录
   // 硬删除：先归档（dsh 原生：立即从活跃列表移除，session.list 不再返回），

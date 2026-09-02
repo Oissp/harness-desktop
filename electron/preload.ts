@@ -146,11 +146,11 @@ const desktop: DesktopBridge = {
   listArchived: async () => {
     const [listRes, stateRes] = await Promise.all([
       call<ArchivedSessionInfo[]>('session:listArchived'),
-      call<{ settings?: AppSettings }>('app:getState'),
+      call<AppSettings>('app:getState'),
     ])
     if (!listRes.ok) return []
-    const meta = stateRes.ok ? stateRes.value?.settings?.archivedSessionMeta : undefined
-    const reviewId = stateRes.ok ? stateRes.value?.settings?.reviewSessionId : undefined
+    const meta = stateRes.ok ? stateRes.value?.archivedSessionMeta : undefined
+    const reviewId = stateRes.ok ? stateRes.value?.reviewSessionId : undefined
     return (listRes.value ?? [])
       .filter((s) => s.sessionId !== reviewId)
       .map((s) => {
