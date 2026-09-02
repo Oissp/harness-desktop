@@ -48,4 +48,4 @@ dsh 引擎使用随机端口。`DshManager` 在引擎异常退出后会重启，
 
 ## 未采用的旧方案
 
-本仓库不维护 iframe 方案，也不维护旧版“为每个桌面功能创建官方客户端模块”的阶段计划。历史推演和验证记录由 Git 历史及 `docs/history/` 保存；当前实现以代码、[README.md](../README.md) 和 [CLAUDE.md](../CLAUDE.md) 为准。
+本仓库不维护 iframe 方案，也不维护旧版“为每个桌面功能创建官方客户端模块”的阶段计划。历史推演和验证记录由 Git 历史及 `docs/history/` 保存；当前实现以代码和 [README.md](../README.md) 为准。
