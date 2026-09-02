@@ -123,6 +123,8 @@ interface DesktopBridge {
   listArchived(): Promise<ArchivedSessionInfo[]>
   /** 硬删除会话（连同磁盘目录）。 */
   hardDeleteSession(sessionId: string, cwd?: string): Promise<boolean>
+  /** 在只读窗口打开归档会话，查看其历史内容。 */
+  openArchiveViewer(sessionId: string, title?: string): Promise<void>
   onEnginePort(cb: (port: number | null) => void): () => void
   onMenuEvent(cb: (action: 'new-chat' | 'open-settings') => void): () => void
 }
@@ -159,6 +161,9 @@ const desktop: DesktopBridge = {
   hardDeleteSession: async (sessionId, cwd) => {
     const res = await call('session:hardDelete', sessionId, cwd)
     return res.ok
+  },
+  openArchiveViewer: async (sessionId, title) => {
+    await call('desktop:openArchiveViewer', sessionId, title)
   },
   onEnginePort: (cb) => {
     const listener = (_e: unknown, status: DshStatus) => {
@@ -417,14 +422,17 @@ function injectArchivedPanel() {
     const row = document.createElement('div')
     row.style.cssText =
       'display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;font:400 12px/1.4 -apple-system,"Segoe UI",Roboto,sans-serif;color:' +
-      c.dim
+      c.dim + ';cursor:pointer'
     row.onmouseenter = () => (row.style.background = c.hover)
     row.onmouseleave = () => (row.style.background = 'transparent')
+    row.onclick = () => {
+      void desktop.openArchiveViewer(s.sessionId, s.title || undefined)
+    }
 
     const title = document.createElement('span')
     title.textContent = s.title || '归档会话 ' + s.sessionId.slice(8, 14)
     title.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
-    title.title = (s.title || s.sessionId) + (s.cwd ? '\n' + s.cwd : '')
+    title.title = (s.title || s.sessionId) + (s.cwd ? '\n' + s.cwd : '') + '\n点击查看会话内容'
     row.appendChild(title)
 
     if (pendingDelete === s.sessionId) {
@@ -515,15 +523,20 @@ function injectArchivedPanel() {
     render()
   }
 
-  /** 确保面板已挂载在侧栏末尾；已挂载且仍在文档内则跳过。 */
+  /** 确保面板已挂载在侧栏末尾；侧栏容器变化或面板脱离时重新挂到当前最佳侧栏。 */
   const ensurePanel = () => {
-    const existing = document.querySelector('[' + PANEL_ATTR + ']')
-    if (existing && existing.isConnected) return
     const sidebar = findSidebar()
     if (!sidebar) return
+    const existing = document.querySelector('[' + PANEL_ATTR + ']') as HTMLElement | null
+    // 已挂在正确的侧栏末尾：跳过。否则（首次、React 重渲染换掉旧容器、或初载命中了错误容器）
+    // 一律（重新）追加到当前最佳侧栏末尾——appendChild 会先把已有节点从旧父级摘下再挂回。
+    if (existing && existing.isConnected && existing.parentElement === sidebar && sidebar.lastElementChild === existing) return
     const c = colors()
-    const panel = document.createElement('div')
-    panel.setAttribute(PANEL_ATTR, '1')
+    let panel = existing
+    if (!panel || !panel.isConnected) {
+      panel = document.createElement('div')
+      panel.setAttribute(PANEL_ATTR, '1')
+    }
     panel.style.cssText =
       'flex:0 0 auto;margin:4px 6px 6px;padding-top:6px;border-top:1px solid ' + c.border
     sidebar.appendChild(panel)

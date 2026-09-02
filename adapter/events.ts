@@ -297,6 +297,13 @@ export function normalizeHistory(events: unknown[]): SessionStreamEvent[] {
     const sessionId = typeof event === 'object' && event !== null && 'sessionId' in obj
       ? String(obj.sessionId ?? '')
       : ''
+    // 历史快照含完整的 assistant/message，跳过 assistant/chunk 增量片段——
+    // 两者同时进 reducer 会产生重复/错序的助手消息（chunk 先拼流式、message 再覆盖，
+    // 但 finish/error 子帧与 turn/step 不完全对齐时覆盖落空，留下重复流式条目）。
+    // 实时流仍需 chunk（流式输出），历史回放只用完整消息。
+    if (typeof event === 'object' && event !== null && (event as { type?: string }).type === 'assistant/chunk') {
+      continue
+    }
     out.push(...normalizeSessionEvent(sessionId, event as DshEvent))
   }
   return out

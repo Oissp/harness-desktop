@@ -8,19 +8,22 @@ interface Props {
   loading: boolean
   onEdit?: (messageId: string, newText: string) => void
   onRegenerate?: (messageId: string) => void
+  /** 自动滚到底部（实时聊天默认开启；只读归档视图关闭，从顶部开始阅读）。 */
+  autoScroll?: boolean
 }
 
 const STEP = 200
 const HARD_CAP = 500
 
-export default function MessageList({ messages, running, loading, onEdit, onRegenerate }: Props) {
+export default function MessageList({ messages, running, loading, onEdit, onRegenerate, autoScroll = true }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   // 可视窗口起点：默认只看最近一批，超长会话防止 DOM 爆炸
   const [windowStart, setWindowStart] = useState(0)
 
   useEffect(() => {
+    if (!autoScroll) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, running])
+  }, [messages, running, autoScroll])
 
   if (loading) {
     return (

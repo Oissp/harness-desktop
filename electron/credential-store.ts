@@ -77,21 +77,7 @@ export function createCredentialStore(userDataDir: string) {
     }
   }
 
-  /** 把引擎明文 yaml 里的敏感 ref 迁移进加密层（幂等）。 */
-  function migrateFromPlain(plainMap: Record<string, string>) {
-    if (!isAvailable()) return
-    const all = readAll()
-    let changed = false
-    for (const [k, v] of Object.entries(plainMap)) {
-      if (typeof v === 'string' && v.length > 0 && !(k in all)) {
-        all[k] = safeStorage.encryptString(v).toString('base64')
-        changed = true
-      }
-    }
-    if (changed) writeAll(all)
-  }
-
-  return { get, set, unset, migrateFromPlain, isAvailable }
+  return { get, set, unset, isAvailable }
 }
 
 /** 应用级 userData 目录。 */

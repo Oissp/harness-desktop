@@ -8,26 +8,12 @@ import { DshManager } from './dsh-manager.js'
 import { SettingsStore } from './settings-store.js'
 import { registerIpc } from './ipc.js'
 import { createCredentialStore, userDataDir } from './credential-store.js'
-import { migrateUserData } from './migrate-userdata.js'
 import updaterModule from 'electron-updater'
 // electron-updater 是 CJS；ESM 下具名导出互操作不可靠，取 default 对象的 autoUpdater
 const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-updater')['autoUpdater'] }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
-
-// userData 路径迁移：旧版用 app.setName('harness-desktop') 锁定路径，现已改为
-// 启动时一次性搬迁数据到 Electron 自然路径（~/.config/dsh-desktop/）。
-// 必须在 whenReady 前、模块级顶层调用（此时 app.getPath 已可用）。
-{
-  const newUserData = app.getPath('userData') // 自然路径：~/.config/dsh-desktop/
-  const configBase = dirname(newUserData)
-  migrateUserData(newUserData, [
-    join(configBase, 'harness-desktop'),
-    join(configBase, 'DSH Desktop', 'harness-desktop'),
-    join(configBase, 'DSH Desktop'),
-  ])
-}
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -385,6 +371,48 @@ function loadEngineUI(port: number, token: string | null) {
   tryLoad()
 }
 
+/**
+ * 在只读子窗口中打开一个归档会话，查看其历史内容。
+ * 归档是单向显示过滤（无取消归档 API），会话数据仍在磁盘原位，
+ * 故可复用桌面 React 渲染层 + adapter.getHistory（session/follow 流不拒绝归档会话）。
+ * 子窗口加载本地 React UI 并以 ?archive=<sessionId> 触发只读归档视图。
+ */
+function openArchiveViewer(sessionId: string, title?: string) {
+  const existing = BrowserWindow.getAllWindows().find((w) => {
+    const u = w.webContents.getURL()
+    return u.includes('archive=') && u.includes(encodeURIComponent(sessionId))
+  })
+  if (existing && !existing.isDestroyed()) {
+    existing.show()
+    existing.focus()
+    return
+  }
+  const win = new BrowserWindow({
+    width: 760,
+    height: 860,
+    minWidth: 460,
+    minHeight: 560,
+    title: title || '归档会话',
+    icon: join(app.getAppPath(), 'build', 'icon.png'),
+    backgroundColor: '#0f1115',
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: true,
+    },
+  })
+  const query = { archive: sessionId, title: title ?? '' }
+  if (VITE_DEV_SERVER_URL) {
+    const u = new URL(VITE_DEV_SERVER_URL)
+    for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v)
+    void win.loadURL(u.toString())
+  } else {
+    void win.loadFile(join(app.getAppPath(), 'dist', 'index.html'), { query })
+  }
+}
+
 /** 移除应用顶部菜单栏：构建后窗口顶部不再显示「文件/编辑/视图」等菜单。 */
 function setupMenu() {
   Menu.setApplicationMenu(null)
@@ -426,26 +454,6 @@ app.whenReady().then(async () => {
   // safeStorage 加密凭证层：桌面端自有的敏感值加密存储
   const creds = createCredentialStore(userDataDir())
 
-  // 迁移：把引擎已有的明文 .credentials.yaml 敏感值加密进 safe-credentials（幂等）
-  try {
-    const { readFileSync, existsSync } = await import('node:fs')
-    const { join } = await import('node:path')
-    const { parse } = await import('yaml')
-    const credFile = join(manager.home, '.credentials.yaml')
-    if (existsSync(credFile)) {
-      const parsed = parse(readFileSync(credFile, 'utf8')) as Record<string, unknown>
-      const plain: Record<string, string> = {}
-      if (parsed && typeof parsed === 'object') {
-        for (const [k, v] of Object.entries(parsed)) {
-          if (typeof v === 'string' && v.length > 0) plain[k] = v
-        }
-      }
-      creds.migrateFromPlain(plain)
-    }
-  } catch {
-    // 迁移失败不阻塞
-  }
-
   // 开机自启（若配置过）——开机自动拉起，保证 dsh 引擎随系统启动
   const appearance = settings.get().appearance
   if (appearance?.autoLaunch) {
@@ -465,6 +473,11 @@ app.whenReady().then(async () => {
   }
   setupUpdater()
   disposeIpc = registerIpc(manager, settings, () => mainWindow, creds)
+
+  // 归档会话只读查看窗口（由官方 UI 注入面板触发）
+  ipcMain.handle('desktop:openArchiveViewer', (_e, sessionId: string, title?: string) => {
+    openArchiveViewer(String(sessionId ?? ''), typeof title === 'string' ? title : undefined)
+  })
 
   createWindow()
   createTray()
