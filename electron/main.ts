@@ -403,6 +403,16 @@ function openArchiveViewer(sessionId: string, title?: string) {
       webSecurity: true,
     },
   })
+  // 窗口关闭时触发主窗口刷新归档列表（标题回写后立即更新显示）
+  win.on('closed', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.executeJavaScript(
+        'window.__hd_refreshArchived && window.__hd_refreshArchived()'
+      ).catch(() => {
+        // 主窗口还未加载官方 UI 或刷新函数未就绪，静默跳过
+      })
+    }
+  })
   const query = { archive: sessionId, title: title ?? '' }
   if (VITE_DEV_SERVER_URL) {
     const u = new URL(VITE_DEV_SERVER_URL)

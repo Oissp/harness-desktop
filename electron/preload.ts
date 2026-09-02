@@ -545,7 +545,9 @@ function injectArchivedPanel() {
 
   const boot = () => {
     void refresh()
-    ensurePanel()
+    // 延迟初次挂载：等侧栏 DOM 稳定后再挂，避免页面加载早期 findSidebar 命中错误容器
+    setTimeout(() => ensurePanel(), 500)
+    setTimeout(() => ensurePanel(), 1500)
     // 诊断：侧栏探测与挂载结果。findSidebar 是结构启发式（官方 UI 类名为构建期
     // hash，不可依赖），上游改版可能致探测失败 —— 排查时开 DevTools 看这行。
     if (process.env.HD_ARCHIVED_DEBUG) {
@@ -575,6 +577,8 @@ function injectArchivedPanel() {
     mo.observe(document.documentElement, { childList: true, subtree: true })
     // 归档集合变化（在官方 UI 里归档会话）无事件回流，定期轻量复查
     setInterval(() => void refresh(), 10_000)
+    // 暴露刷新接口：归档窗口关闭时触发立即刷新（标题回写后更新列表显示）
+    ;(window as { __hd_refreshArchived?: () => Promise<void> }).__hd_refreshArchived = refresh
   }
 
   if (document.readyState === 'loading') {
