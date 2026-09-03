@@ -29,6 +29,8 @@ const api: HarnessApi = {
   ensureDsh: () => call('dsh:ensure'),
   shutdownDsh: () => call('dsh:shutdown'),
   restartDsh: () => call('dsh:restart'),
+  restoreCheckpointAndRestart: () => call('dsh:restoreCheckpoint'),
+  openConfigDir: () => call('dsh:openConfigDir'),
   describe: () => call('dsh:describe'),
 
   listSessions: () => call('session:list'),

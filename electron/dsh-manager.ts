@@ -219,6 +219,23 @@ export class DshManager {
     return this.start()
   }
 
+  /**
+   * 从最后良好配置快照回滚后重启（恢复页"回滚配置"按钮）。
+   * 先停引擎，再把 last-good 快照恢复回 profile，然后重新 boot。
+   * 回滚 0 个文件（无 last-good）时仍重启——至少给用户一次干净重试。
+   */
+  async restoreCheckpointAndRestart(): Promise<DshManagerStatus> {
+    this.crashDetector.reset()
+    this.recovery = false
+    this.lastError = null
+    await this.stop()
+    const restored = restoreFromLastGood(this.dshHome)
+    if (restored > 0) {
+      this.lastError = `已从最后良好配置回滚 ${restored} 个文件，正在重启…`
+    }
+    return this.start()
+  }
+
   /** 启动（若已就绪则直接返回）。返回就绪后的状态快照。 */
   async start(): Promise<DshManagerStatus> {
     if (this.ready && this.adapter) return this.status()

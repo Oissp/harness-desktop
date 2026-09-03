@@ -26,6 +26,7 @@ function DesktopApp() {
   const [booting, setBooting] = useState(true)
   const [fatal, setFatal] = useState<string | null>(null)
   const [restarting, setRestarting] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [sessionListVersion, setSessionListVersion] = useState(0)
 
   useEffect(() => {
@@ -124,18 +125,48 @@ function DesktopApp() {
     )
   }
 
-  // 崩溃恢复态：引擎反复崩溃已触发崩溃环熔断，展示恢复页 + 手动重启按钮
+  // 崩溃恢复态：引擎反复崩溃已触发崩溃环熔断，展示恢复页 + 自助恢复操作。
+  // 借鉴 anywhere-labs/dsh-desktop 的启动恢复助手：提供回滚配置 / 打开配置目录 /
+  // 重启内核三条出路，而非仅一个重启按钮——坏配置导致的崩溃只重启会原地复现。
   if (dshStatus?.recovery) {
+    const busy = restarting || restoring
     return (
       <div className="boot-screen">
         <WhaleLogo className="boot-logo" />
         <div className="boot-text">引擎反复崩溃，已进入恢复模式</div>
         <div className="boot-subtext" style={{ fontSize: 13, color: 'var(--dsw-text-2)', marginTop: 4, maxWidth: 420, textAlign: 'center' }}>
-          {dshStatus.error ?? '内核在短时间内多次崩溃，已停止自动重启。你可以检查配置后手动重启内核。'}
+          {dshStatus.error ?? '内核在短时间内多次崩溃，已停止自动重启。可回滚到上次良好配置，或检查配置后重启。'}
         </div>
         <button
           className="btn primary"
-          disabled={restarting}
+          disabled={busy}
+          onClick={async () => {
+            setRestoring(true)
+            try {
+              const res = await harness.restoreCheckpointAndRestart()
+              if (!res.ok && res.error) setFatal(res.error.message)
+            } catch (e) {
+              setFatal((e as Error).message)
+            } finally {
+              setRestoring(false)
+            }
+          }}
+        >
+          {restoring ? '正在回滚…' : '回滚配置并重启'}
+        </button>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={async () => {
+            const res = await harness.openConfigDir()
+            if (!res.ok && res.error) setFatal(res.error.message)
+          }}
+        >
+          打开配置目录
+        </button>
+        <button
+          className="btn"
+          disabled={busy}
           onClick={async () => {
             setRestarting(true)
             try {

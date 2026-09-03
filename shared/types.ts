@@ -375,6 +375,10 @@ export interface HarnessApi {
   shutdownDsh(): Promise<IpcResult<void>>
   /** 手动重启内核（恢复页"重启内核"按钮；清除崩溃环检测器后重新 boot）。 */
   restartDsh(): Promise<IpcResult<DshStatus>>
+  /** 从最后良好配置快照回滚后重启（恢复页"回滚配置"按钮）。 */
+  restoreCheckpointAndRestart(): Promise<IpcResult<DshStatus>>
+  /** 在文件管理器中打开 dsh 配置目录（恢复页"打开配置目录"按钮）。 */
+  openConfigDir(): Promise<IpcResult<void>>
   describe(): Promise<IpcResult<DshStatus>>
 
   // ---- 021 自动更新 ----

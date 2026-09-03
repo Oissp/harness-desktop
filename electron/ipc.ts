@@ -4,7 +4,7 @@
  * renderer 只认识这里的 channel 与 shared/types.ts 里的类型；
  * dsh 上游变更永远到不了这里。
  */
-import { ipcMain, dialog, clipboard, app, type BrowserWindow } from 'electron'
+import { ipcMain, dialog, clipboard, app, shell, type BrowserWindow } from 'electron'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import type { DshManager } from './dsh-manager.js'
@@ -141,6 +141,13 @@ export function registerIpc(
   ipcMain.handle('dsh:shutdown', () => run(() => manager.stop()))
   // 手动重启内核（恢复页按钮；清除崩溃环后重新 boot）
   ipcMain.handle('dsh:restart', () => run(() => manager.restart()))
+  ipcMain.handle('dsh:restoreCheckpoint', () => run(() => manager.restoreCheckpointAndRestart()))
+  ipcMain.handle('dsh:openConfigDir', () =>
+    run(async () => {
+      // 打开 dsh profile 目录供用户检查配置（恢复页"打开配置目录"按钮）
+      await shell.openPath(join(manager.home, 'profiles', 'web'))
+    }),
+  )
   ipcMain.handle('dsh:describe', () =>
     run(async () => {
       const a = adapter()
