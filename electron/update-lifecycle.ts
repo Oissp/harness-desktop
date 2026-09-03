@@ -10,7 +10,9 @@
  *
  * main.ts 只负责创建实例、把托盘菜单 click 指向 checkNow/applyDownloadedUpdate。
  */
-import { app, BrowserWindow, Notification, ipcMain } from 'electron'
+import { app, BrowserWindow, Notification, ipcMain, dialog, clipboard, shell } from 'electron'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import type { autoUpdater as AutoUpdaterType } from 'electron-updater'
 import type { DesktopLogger } from './desktop-logger.js'
 import { UpdateStateStore } from './update-state.js'
@@ -225,15 +227,62 @@ export class UpdateLifecycle {
       const msg = (err as Error)?.message ?? '未知错误'
       onResult('error', `检查更新失败：${msg}`)
       this.logger.warn(`[updater] 检查更新失败: ${msg}`)
-      // 应用更新阶段失败：doInstall（dpkg via pkexec/sudo）抛错——常见 dpkg 锁占用、
-      // pkexec 鉴权取消 / 无 polkit agent、依赖冲突。quitAndInstall 不会退出应用，
-      // 弹通知告知具体原因，避免"点击无反应"的静默失败。
+      // 应用更新阶段失败：doInstall（dpkg via pkexec --disable-internal-agent）抛错。
+      // electron-updater 在 Linux 用 pkexec --disable-internal-agent 提权，要求一个
+      // 图形 polkit 认证代理在运行；无代理时 pkexec 退 127。这会影响所有没装 polkit
+      // 代理的 Debian 用户。quitAndInstall 不会退出应用——弹原生对话框给出手动安装
+      // 出路（打开安装包交给系统软件中心 / 复制 dpkg 命令），而非只弹通知。
       if (this.updateQuitPending) {
         this.updateQuitPending = false
-        this.notify(`应用更新失败：${msg}。可稍后重试，或在终端手动执行 sudo dpkg -i 安装。`)
+        void this.offerManualInstall(msg)
       }
       this.sendStatus({ state: 'error', message: msg })
     })
+  }
+
+  /**
+   * 安装失败兜底：定位已下载的 .deb，弹原生对话框让用户手动安装。
+   * 路径来源：electron-updater 把下载文件放在 <baseCachePath>/<updaterCacheDirName>/pending/。
+   */
+  private async offerManualInstall(failureMsg: string): Promise<void> {
+    const debPath = this.findDownloadedDeb()
+    const win = this.hooks.getWindow()
+    const buttons = debPath ? ['打开安装包', '复制命令', '取消'] : ['复制命令', '取消']
+    const detail = debPath
+      ? `自动安装失败：${failureMsg}\n\n通常是因为系统缺少 polkit 图形认证代理（pkexec 退 127）。可打开安装包交给系统软件中心安装，或在终端执行：\nsudo dpkg -i "${debPath}"`
+      : `自动安装失败：${failureMsg}\n\n通常是因为系统缺少 polkit 图形认证代理。请在终端手动安装已下载的 .deb。`
+    const choice = await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
+      type: 'warning',
+      title: '应用更新失败',
+      message: `应用更新 v${this.updateReadyVersion ?? ''} 失败`,
+      detail,
+      buttons,
+      defaultId: 0,
+      cancelId: buttons.length - 1,
+    })
+    if (choice.response === 0 && debPath) {
+      // 打开 .deb：xdg-open 在 Debian 上交给 GNOME Software / Discover，它们有独立 GUI 认证
+      await shell.openPath(debPath)
+    } else if ((debPath && choice.response === 1) || (!debPath && choice.response === 0)) {
+      clipboard.writeText(debPath ? `sudo dpkg -i "${debPath}"` : 'sudo dpkg -i <下载的 .deb 路径>')
+    }
+  }
+
+  /** 在 updater 缓存目录的 pending/ 下查找已下载的 .deb。 */
+  private findDownloadedDeb(): string | null {
+    try {
+      // baseCachePath: Linux=XDG_CACHE_HOME 或 ~/.cache；updaterCacheDirName 来自 app-update.yml
+      const baseCache = process.env.XDG_CACHE_HOME || join(app.getPath('home'), '.cache')
+      const pending = join(baseCache, 'dsh-desktop-updater', 'pending')
+      if (!existsSync(pending)) return null
+      const debs = readdirSync(pending).filter((f) => f.endsWith('.deb'))
+      if (debs.length === 0) return null
+      // 多个时取最新修改的
+      debs.sort((a, b) => statSync(join(pending, b)).mtimeMs - statSync(join(pending, a)).mtimeMs)
+      return join(pending, debs[0])
+    } catch {
+      return null
+    }
   }
 
   private clearManualTimer(): void {
