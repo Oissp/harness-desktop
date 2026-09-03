@@ -224,7 +224,8 @@ jobs:
             libglib2.0-dev libsecret-1-dev libffi-dev \
             libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
             libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
-            libxfixes3 libxrandr2 libgbm1 libasound2
+            libxfixes3 libxrandr2 libgbm1 libasound2 \
+            xvfb
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
           apt-get install -y nodejs
           node --version
@@ -286,6 +287,17 @@ jobs:
 
       - name: Verify .deb integrity (PR #304 实践)
         run: node scripts/verify-deb.mjs
+
+      - name: Smoke test packaged runtime
+        run: |
+          # 实际启动 linux-unpacked 产物 8s，断言主进程不立即崩溃、日志被创建、
+          # 无模块加载失败。verify-deb 只看静态结构，这里覆盖运行时（借鉴
+          # anywhere-labs/dsh-desktop verify-packaged-runtime）。
+          if [ ! -d out/linux-unpacked ]; then
+            echo "::error::未找到 out/linux-unpacked，烟雾测试无法执行"
+            exit 1
+          fi
+          xvfb-run -a node scripts/smoke-test.mjs out/linux-unpacked
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
