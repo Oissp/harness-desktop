@@ -31,6 +31,8 @@ export class MainWindowGeneration {
   /** 当前窗口指向的引擎端口（防重复 loadURL；导航白名单精确匹配）。 */
   private loadedEnginePort: number | null = null
   private released = false
+  /** 应用正在退出（更新或关机）：close 处理器据此放行窗口关闭，不再 hide 到托盘。 */
+  private quitting = false
 
   constructor(hooks: WindowGenerationHooks) {
     this.hooks = hooks
@@ -63,6 +65,11 @@ export class MainWindowGeneration {
 
   get isDestroyed(): boolean {
     return this.win.isDestroyed()
+  }
+
+  /** 标记应用正在退出（更新安装 / 关机）：close 处理器据此放行窗口关闭。 */
+  markQuitting(): void {
+    this.quitting = true
   }
 
   /** 当前加载的引擎端口（null = 回退屏）。 */
@@ -129,9 +136,10 @@ export class MainWindowGeneration {
       this.release()
     })
 
-    // 关闭窗口（X）→ 隐藏到托盘
+    // 关闭窗口（X）→ 隐藏到托盘。但应用正在退出（更新安装 / 关机）时放行关闭，
+    // 否则 preventDefault 会 abort app.quit()，导致更新装完老进程不退、新进程不启。
     this.win.on('close', (e) => {
-      if (this.released) return
+      if (this.released || this.quitting) return
       e.preventDefault()
       this.win.hide()
       this.hooks.onHideToTray()

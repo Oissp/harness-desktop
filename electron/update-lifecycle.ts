@@ -30,6 +30,8 @@ export interface UpdateLifecycleHooks {
   rebuildTrayMenu: () => void
   /** 退出应用（安装成功后走完整 quit 生命周期以触发 relaunch）。 */
   requestQuit: () => void
+  /** 标记应用正在退出（安装前调用）：让窗口 close 处理器放行、before-quit 不拦截。 */
+  markUpdateQuitting: () => void
 }
 
 export class UpdateLifecycle {
@@ -120,10 +122,14 @@ export class UpdateLifecycle {
   /** 应用已下载的更新并重启。 */
   applyDownloadedUpdate(): void {
     if (!this.active || !this.updateReadyVersion) return
-    // 单飞：安装前重新检查版本是否仍最新。下载可能在后台停留很久，期间可能已有更新版本
-    // 发布；直接安装旧版本会让用户多走一轮更新。recheck 失败则仍用已下载版本兜底安装。
-    this.logger.info(`[updater] 应用更新 v${this.updateReadyVersion}（安装前 recheck 版本）`)
+    this.logger.info(`[updater] 应用更新 v${this.updateReadyVersion}`)
     this.updateQuitPending = true
+    // 先标记退出：doInstall 的 spawnSync 会同步阻塞主进程跑完 dpkg，之后
+    // quitAndInstall 在 setImmediate 里调 app.quit()。若不提前标记，窗口的
+    // close-to-tray 处理器会 preventDefault 把 quit abort 掉——dpkg 装完了
+    // 但老进程不退、relaunch 不触发，用户卡在旧版本。标记后 close 处理器
+    // 放行、before-quit 也不再拦截，app.quit() 能走完 → relaunch 拉起新版本。
+    this.hooks.markUpdateQuitting()
     try {
       this.autoUpdater.quitAndInstall()
     } catch (err) {

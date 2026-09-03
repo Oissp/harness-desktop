@@ -225,6 +225,7 @@ function setupMenu() {
 function shutdown() {
   if (quitting) return
   quitting = true
+  windowGen?.markQuitting()
   if (tray) {
     tray.destroy()
     tray = null
@@ -290,6 +291,11 @@ app.whenReady().then(async () => {
     getWindow: () => mainWindow,
     rebuildTrayMenu,
     requestQuit: () => shutdown(),
+    markUpdateQuitting: () => {
+      // 更新驱动的退出：置 quitting 让 before-quit 不拦截、窗口 close 处理器放行
+      quitting = true
+      windowGen?.markQuitting()
+    },
   })
   updateLifecycle.start()
   disposeIpc = registerIpc(manager, settings, () => mainWindow, creds)
