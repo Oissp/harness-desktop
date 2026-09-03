@@ -14,7 +14,7 @@
  * 正是此类审计测试抓住的漂移。先改契约再写代码是流程防线。
  */
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,8 +23,6 @@ const ROOT = join(__dirname, '..', '..')
 
 const typesSrc = readFileSync(join(ROOT, 'shared', 'types.ts'), 'utf8')
 const preloadSrc = readFileSync(join(ROOT, 'electron', 'preload.ts'), 'utf8')
-const ipcSrc = readFileSync(join(ROOT, 'electron', 'ipc.ts'), 'utf8')
-const mainSrc = readFileSync(join(ROOT, 'electron', 'main.ts'), 'utf8')
 
 /** 从 shared/types.ts 的 HarnessApi 接口提取方法名（处理嵌套大括号）。 */
 function extractHarnessApiMethods(): string[] {
@@ -87,10 +85,13 @@ function extractPreloadChannels(): Set<string> {
   return channels
 }
 
-/** 从 ipc.ts + main.ts 提取所有 ipcMain.handle 注册的 channel。 */
+/** 从 electron/ 下所有 .ts 提取 ipcMain.handle 注册的 channel（main + ipc + 拆分模块）。 */
 function extractIpcChannels(): Set<string> {
   const channels = new Set<string>()
-  for (const src of [ipcSrc, mainSrc]) {
+  const electronDir = join(ROOT, 'electron')
+  const files = readdirSync(electronDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'))
+  for (const f of files) {
+    const src = readFileSync(join(electronDir, f), 'utf8')
     for (const m of src.matchAll(/ipcMain\.handle\(\s*['"]([\w:-]+)['"]/g)) {
       channels.add(m[1])
     }

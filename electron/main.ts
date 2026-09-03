@@ -8,12 +8,23 @@ import { DshManager } from './dsh-manager.js'
 import { SettingsStore } from './settings-store.js'
 import { registerIpc } from './ipc.js'
 import { createCredentialStore, userDataDir } from './credential-store.js'
+import { LogFileSink } from './log-sink.js'
+import { FileLogger, setLogger, installUncaughtExceptionCapture, installChildProcessGoneLogging, type DesktopLogger } from './desktop-logger.js'
+import { UpdateLifecycle } from './update-lifecycle.js'
 import updaterModule from 'electron-updater'
 // electron-updater 是 CJS；ESM 下具名导出互操作不可靠，取 default 对象的 autoUpdater
 const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-updater')['autoUpdater'] }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+// 日志器：app ready 前用 ConsoleLogger 兜底（uncaughtException 已可落盘需先有 sink）。
+// 尽早在模块加载时建 sink，确保崩溃现场不丢。
+const logSink = new LogFileSink(join(app.getPath('userData'), 'logs'))
+const logger: DesktopLogger = new FileLogger(logSink)
+setLogger(logger)
+// 第一个未捕获异常：落盘后致命退出（必须在任何异步工作前注册）
+installUncaughtExceptionCapture((code) => app.exit(code))
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -23,7 +34,7 @@ let disposeIpc: () => void = () => {}
 let quitting = false
 let trayHintShown = false
 
-// ---- 自动更新（021）：启动后台检查 + 手动检查 ----
+// ---- 自动更新 ----
 // 注意：macOS 自动更新依赖代码签名（017）；未签名时自动更新被禁用，静默跳过。
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
@@ -36,166 +47,9 @@ autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.allowPrerelease = true
 autoUpdater.channel = 'alpha'
 
-// 托盘菜单"检查更新"复用的统一触发入口（setupUpdater 里赋值）。
-// 托盘与 IPC 都走它，保证 disabled/超时/通知逻辑一致。
-let triggerManualUpdateCheck: () => void = () => {}
-
-// 更新已下载待安装：downloaded 后置位，托盘菜单"检查更新"切为"应用更新"。
-// 正常运行时窗口指向官方引擎 UI，桌面 React 侧边栏不可见，托盘是唯一持久入口，
-// 故在此提供"一键应用更新"，免去用户退出应用再重开的绕路。
-let updateReadyVersion: string | null = null
-let updaterActive = false
-// 更新驱动的退出：applyDownloadedUpdate 置位，shutdown 据此走完整 quit 生命周期
-// （而非 app.exit）以 honoring doInstall 已设置的 app.relaunch()，确保安装后重启。
-// doInstall 失败时 error 处理器复位。
-let updateQuitPending = false
-
-function setupUpdater() {
-  // updater 是否活跃：仅打包 + 已签名（macOS）/ 正常 Linux 构建时为 true。
-  // dev 模式与未签名构建下为 false —— 此时仍注册 IPC handler（返回 active=false
-  // 并下发 disabled 状态），避免渲染层 invoke 到未注册通道而报原始错误。
-  const active = app.isPackaged && autoUpdater.isUpdaterActive()
-  updaterActive = active
-  if (!active) {
-    const reason = app.isPackaged ? '未签名构建，自动更新不可用' : '开发模式，自动更新不可用'
-    console.warn(`[dsh-desktop] ${reason}（静默跳过）`)
-  }
-
-  // 手动检查的超时兜底：checkForUpdates() 是 fire-and-forget，状态靠 update:status
-  // 事件回流。若网络/registry 静默失败、迟迟不发事件，前端会卡在"检查中…"。
-  // 这里在手动触发后挂一个定时器，收到任一终态/有结果事件即清除；超时则下发 error。
-  let manualCheckTimer: NodeJS.Timeout | null = null
-  const MANUAL_CHECK_TIMEOUT = 25_000
-  const clearManualTimer = () => {
-    if (manualCheckTimer) {
-      clearTimeout(manualCheckTimer)
-      manualCheckTimer = null
-    }
-  }
-  // 手动触发标志：区分托盘/按钮手动检查与后台定时复检。仅手动检查下发系统通知，
-  // 后台复检保持静默（避免每 6h 弹通知打扰）。
-  let manualCheck = false
-
-  const notifyUpdate = (body: string) => {
-    try {
-      new Notification({ title: 'DSH Desktop', body }).show()
-    } catch {
-      // 通知失败不阻塞
-    }
-  }
-
-  // 统一的手动检查入口：托盘菜单与 IPC update:check 都走这里。
-  // !active 时直接通知 + 下发 disabled 状态（不挂超时、不调 autoUpdater）。
-  const doManualCheck = () => {
-    if (!active) {
-      const msg = app.isPackaged ? '当前为未签名构建，自动更新不可用' : '开发模式下无法检查更新'
-      mainWindow?.webContents.send('update:status', { state: 'disabled', message: msg })
-      notifyUpdate(msg)
-      return
-    }
-    manualCheck = true
-    clearManualTimer()
-    manualCheckTimer = setTimeout(() => {
-      manualCheckTimer = null
-      mainWindow?.webContents.send('update:status', {
-        state: 'error',
-        message: '检查更新超时，请稍后重试或检查网络后重试',
-      })
-      if (manualCheck) {
-        manualCheck = false
-        notifyUpdate('检查更新超时，请稍后重试')
-      }
-    }, MANUAL_CHECK_TIMEOUT)
-    void autoUpdater.checkForUpdates()
-  }
-  triggerManualUpdateCheck = doManualCheck
-
-  ipcMain.handle('update:check', () => {
-    try {
-      doManualCheck()
-      return { ok: true, value: { active } }
-    } catch (err) {
-      clearManualTimer()
-      return { ok: false, error: { code: 'update-error', message: (err as Error).message } }
-    }
-  })
-  ipcMain.handle('update:quitAndInstall', () => {
-    if (!active) {
-      return { ok: false, error: { code: 'update-disabled', message: '自动更新不可用' } }
-    }
-    autoUpdater.quitAndInstall()
-    return { ok: true }
-  })
-
-  // updater 不活跃时到此为止：不注册事件监听、不启动定时复检
-  if (!active) return
-
-  // 收到任一"有结果"事件即清除手动检查超时定时器；手动触发时额外发系统通知
-  // （引擎 UI 状态下窗口无 onUpdateStatus 监听器，通知是唯一可见反馈）。
-  const onResult = (state: string, notifyBody?: string) => {
-    if (state === 'available' || state === 'up-to-date' || state === 'error' || state === 'downloaded') {
-      clearManualTimer()
-    }
-    if (manualCheck && notifyBody) {
-      manualCheck = false
-      notifyUpdate(notifyBody)
-    }
-  }
-  autoUpdater.on('checking-for-update', () => {
-    mainWindow?.webContents.send('update:status', { state: 'checking' })
-  })
-  autoUpdater.on('update-available', (info) => {
-    onResult('available', `发现新版本 v${info.version}，正在后台下载…`)
-    mainWindow?.webContents.send('update:status', { state: 'available', version: info.version })
-    // 后台自动下载（autoDownload=true）
-  })
-  autoUpdater.on('update-not-available', () => {
-    onResult('up-to-date', '已是最新版本')
-    mainWindow?.webContents.send('update:status', { state: 'up-to-date' })
-  })
-  autoUpdater.on('download-progress', (p) => {
-    mainWindow?.webContents.send('update:status', {
-      state: 'downloading',
-      percent: Math.round(p.percent),
-    })
-  })
-  autoUpdater.on('update-downloaded', (info) => {
-    // downloaded 是重要状态：无论手动/后台都通知（重启提示）
-    onResult('downloaded')
-    updateReadyVersion = info.version
-    rebuildTrayMenu()
-    mainWindow?.webContents.send('update:status', { state: 'downloaded', version: info.version })
-    notifyUpdate(`新版本 ${info.version} 已下载，点托盘"应用更新"完成安装。`)
-  })
-  autoUpdater.on('error', (err) => {
-    const msg = (err as Error)?.message ?? '未知错误'
-    onResult('error', `检查更新失败：${msg}`)
-    // 失败静默（日志记录，不打扰用户）
-    console.warn('[dsh-desktop] 检查更新失败:', msg)
-    // 应用更新阶段失败：quitAndInstall 的 doInstall（dpkg via pkexec/sudo）抛错——
-    // 常见原因是 dpkg 锁被 unattended-upgrades 占用、pkexec 鉴权被取消/无 polkit
-    // agent、或依赖冲突。此时 quitAndInstall 不会退出应用，错误原本只进 console.warn
-    // （打包后不可见）。弹通知告知用户具体原因，避免"点击无反应"的静默失败。
-    if (updateQuitPending) {
-      updateQuitPending = false
-      notifyUpdate(`应用更新失败：${msg}。可稍后重试，或在终端手动执行 sudo dpkg -i 安装。`)
-    }
-    mainWindow?.webContents.send('update:status', { state: 'error', message: msg })
-  })
-
-  // 启动后台检查 + 定时复检：检测 GitHub Release 新版本（v<version> + latest-linux.yml）。
-  // 启动后延迟 15s 检查一次（避开引擎启动峰值），之后每 6 小时复检一次。
-  // 失败静默（error 事件已记录），不打扰用户。
-  const checkUpdates = () => {
-    try {
-      void autoUpdater.checkForUpdates()
-    } catch (err) {
-      console.warn('[dsh-desktop] 检查更新失败:', (err as Error)?.message ?? err)
-    }
-  }
-  setTimeout(checkUpdates, 15_000)
-  setInterval(checkUpdates, 6 * 60 * 60 * 1000)
-}
+// 更新生命周期实例（app.whenReady 中创建）。单飞检查、安装前 recheck、
+// 按版本去重后台提示，见 electron/update-lifecycle.ts。
+let updateLifecycle: UpdateLifecycle | null = null
 
 /** 显示/恢复主窗口（无窗口则新建）。托盘菜单与单击共用。 */
 function showWindow() {
@@ -208,18 +62,14 @@ function showWindow() {
   }
 }
 
-/** 应用已下载的更新并重启。仅在 updater 活跃且有待安装版本时生效。 */
+/** 应用已下载的更新并重启。委托给 UpdateLifecycle（安装前 recheck + 退出生命周期）。 */
 function applyDownloadedUpdate() {
-  if (!updaterActive || !updateReadyVersion) return
-  // 置位后：doInstall 成功 → shutdown 走 app.quit() 以触发 relaunch；
-  // doInstall 失败 → error 处理器复位并弹通知。quitAndInstall 同步执行 doInstall，
-  // 故返回前即可确定成败。
-  updateQuitPending = true
-  autoUpdater.quitAndInstall()
+  updateLifecycle?.applyDownloadedUpdate()
 }
 
 /** 构建托盘右键菜单：更新已下载时"检查更新"切为"应用更新"。 */
 function buildTrayMenu(): Menu {
+  const readyVersion = updateLifecycle?.readyVersion ?? null
   return Menu.buildFromTemplate([
     { label: '显示主窗口', click: showWindow },
     {
@@ -230,9 +80,9 @@ function buildTrayMenu(): Menu {
         if (win && !win.isDestroyed()) win.webContents.send('menu:new-chat')
       },
     },
-    updateReadyVersion
-      ? { label: `应用更新 v${updateReadyVersion}`, click: applyDownloadedUpdate }
-      : { label: '检查更新', click: () => triggerManualUpdateCheck() },
+    readyVersion
+      ? { label: `应用更新 v${readyVersion}`, click: applyDownloadedUpdate }
+      : { label: '检查更新', click: () => updateLifecycle?.checkNow() },
     { type: 'separator' },
     { label: '退出', click: () => shutdown() },
   ])
@@ -375,7 +225,7 @@ function loadEngineUI(port: number, token: string | null) {
     if (!mainWindow || mainWindow.isDestroyed()) return
     if (loadedEnginePort !== port) return
     void mainWindow.loadURL(url).catch((err) => {
-      console.warn('[dsh-desktop] 加载官方 UI 失败:', (err as Error)?.message ?? err)
+      logger.warn(`[loadEngineUI] 加载官方 UI 失败: ${(err as Error)?.message ?? err}`)
       if (loadedEnginePort === port) loadedEnginePort = null
       // 递增重试：1s/2s/5s/... 最多 10 次，避免窗口永停回退屏
       attempt += 1
@@ -456,7 +306,7 @@ function shutdown() {
   const running = manager && manager.status().running
   const finish = () => {
     disposeIpc()
-    if (updateQuitPending) {
+    if (updateLifecycle?.isQuitPending) {
       // 更新驱动退出：doInstall 已调 app.relaunch()。app.exit 跳过 before-quit/will-quit
       // 生命周期，部分 Electron 版本不会触发 relaunch，导致安装后应用不重启。此处改走
       // app.quit() 完成完整退出流程以 honoring relaunch。quitting 已置 true，before-quit
@@ -506,7 +356,16 @@ app.whenReady().then(async () => {
   if (process.platform === 'linux') {
     app.setDesktopName('dsh-desktop.desktop')
   }
-  setupUpdater()
+  // utility/GPU 等子进程异常退出落盘
+  installChildProcessGoneLogging(app)
+  logger.info(`[boot] DSH Desktop 启动，版本 ${app.getVersion()}，日志目录 ${join(app.getPath('userData'), 'logs')}`)
+  // 更新生命周期：单飞检查 + 安装前 recheck + 按版本去重后台提示
+  updateLifecycle = new UpdateLifecycle(autoUpdater, logger, {
+    getWindow: () => mainWindow,
+    rebuildTrayMenu,
+    requestQuit: () => shutdown(),
+  })
+  updateLifecycle.start()
   disposeIpc = registerIpc(manager, settings, () => mainWindow, creds)
 
   // 归档会话只读查看窗口（由官方 UI 注入面板触发）
@@ -534,7 +393,7 @@ app.whenReady().then(async () => {
   void manager.start().then((s) => {
     if (s.port) loadEngineUI(s.port, manager.token)
   }).catch((err) => {
-    console.error('[dsh-desktop] dsh 启动失败:', err)
+    logger.error(`[dsh] 启动失败: ${err instanceof Error ? err.stack ?? err.message : err}`)
   })
 
   // 端口跟随：引擎崩溃重启换端口 → 窗口重新 loadURL 新端口（A0 端口漂移）
