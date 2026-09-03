@@ -45,6 +45,10 @@ let triggerManualUpdateCheck: () => void = () => {}
 // 故在此提供"一键应用更新"，免去用户退出应用再重开的绕路。
 let updateReadyVersion: string | null = null
 let updaterActive = false
+// 更新驱动的退出：applyDownloadedUpdate 置位，shutdown 据此走完整 quit 生命周期
+// （而非 app.exit）以 honoring doInstall 已设置的 app.relaunch()，确保安装后重启。
+// doInstall 失败时 error 处理器复位。
+let updateQuitPending = false
 
 function setupUpdater() {
   // updater 是否活跃：仅打包 + 已签名（macOS）/ 正常 Linux 构建时为 true。
@@ -164,10 +168,19 @@ function setupUpdater() {
     notifyUpdate(`新版本 ${info.version} 已下载，点托盘"应用更新"完成安装。`)
   })
   autoUpdater.on('error', (err) => {
-    onResult('error', `检查更新失败：${(err as Error)?.message ?? '未知错误'}`)
+    const msg = (err as Error)?.message ?? '未知错误'
+    onResult('error', `检查更新失败：${msg}`)
     // 失败静默（日志记录，不打扰用户）
-    console.warn('[dsh-desktop] 检查更新失败:', (err as Error)?.message ?? err)
-    mainWindow?.webContents.send('update:status', { state: 'error', message: err?.message })
+    console.warn('[dsh-desktop] 检查更新失败:', msg)
+    // 应用更新阶段失败：quitAndInstall 的 doInstall（dpkg via pkexec/sudo）抛错——
+    // 常见原因是 dpkg 锁被 unattended-upgrades 占用、pkexec 鉴权被取消/无 polkit
+    // agent、或依赖冲突。此时 quitAndInstall 不会退出应用，错误原本只进 console.warn
+    // （打包后不可见）。弹通知告知用户具体原因，避免"点击无反应"的静默失败。
+    if (updateQuitPending) {
+      updateQuitPending = false
+      notifyUpdate(`应用更新失败：${msg}。可稍后重试，或在终端手动执行 sudo dpkg -i 安装。`)
+    }
+    mainWindow?.webContents.send('update:status', { state: 'error', message: msg })
   })
 
   // 启动后台检查 + 定时复检：检测 GitHub Release 新版本（v<version> + latest-linux.yml）。
@@ -198,6 +211,10 @@ function showWindow() {
 /** 应用已下载的更新并重启。仅在 updater 活跃且有待安装版本时生效。 */
 function applyDownloadedUpdate() {
   if (!updaterActive || !updateReadyVersion) return
+  // 置位后：doInstall 成功 → shutdown 走 app.quit() 以触发 relaunch；
+  // doInstall 失败 → error 处理器复位并弹通知。quitAndInstall 同步执行 doInstall，
+  // 故返回前即可确定成败。
+  updateQuitPending = true
   autoUpdater.quitAndInstall()
 }
 
@@ -439,7 +456,15 @@ function shutdown() {
   const running = manager && manager.status().running
   const finish = () => {
     disposeIpc()
-    app.exit(0)
+    if (updateQuitPending) {
+      // 更新驱动退出：doInstall 已调 app.relaunch()。app.exit 跳过 before-quit/will-quit
+      // 生命周期，部分 Electron 版本不会触发 relaunch，导致安装后应用不重启。此处改走
+      // app.quit() 完成完整退出流程以 honoring relaunch。quitting 已置 true，before-quit
+      // 处理器不会再拦截。
+      app.quit()
+    } else {
+      app.exit(0)
+    }
   }
   if (running) {
     // 最多等 6s，超时强制退出
