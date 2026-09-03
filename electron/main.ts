@@ -1,7 +1,7 @@
 /**
  * electron/main.ts —— 应用入口。
  */
-import { app, BrowserWindow, Menu, Tray, Notification, nativeImage, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, Tray, Notification, nativeImage, ipcMain } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DshManager } from './dsh-manager.js'
@@ -11,6 +11,7 @@ import { createCredentialStore, userDataDir } from './credential-store.js'
 import { LogFileSink } from './log-sink.js'
 import { FileLogger, setLogger, installUncaughtExceptionCapture, installChildProcessGoneLogging, type DesktopLogger } from './desktop-logger.js'
 import { UpdateLifecycle } from './update-lifecycle.js'
+import { MainWindowGeneration } from './window-generation.js'
 import updaterModule from 'electron-updater'
 // electron-updater 是 CJS；ESM 下具名导出互操作不可靠，取 default 对象的 autoUpdater
 const { autoUpdater } = updaterModule as { autoUpdater: typeof import('electron-updater')['autoUpdater'] }
@@ -27,6 +28,7 @@ setLogger(logger)
 installUncaughtExceptionCapture((code) => app.exit(code))
 
 let mainWindow: BrowserWindow | null = null
+let windowGen: MainWindowGeneration | null = null
 let tray: Tray | null = null
 let manager: DshManager
 let settings: SettingsStore
@@ -137,105 +139,29 @@ app.on('second-instance', () => {
   }
 })
 
+/**
+ * 创建主窗口 Shell generation。窗口、导航防护、引擎端口跟踪由 MainWindowGeneration
+ * 完整拥有；引擎崩溃重启换端口时调 windowGen.loadEngineUI / loadFallback 即可，
+ * 状态自洽、无遗留监听器（借鉴 anywhere-labs/dsh-desktop ElectronShellGeneration）。
+ */
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 900,
-    minHeight: 620,
-    title: 'DSH Desktop',
-    icon: join(app.getAppPath(), 'build', 'icon.png'),
-    backgroundColor: '#0f1115',
-    webPreferences: {
-      preload: join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      // sandbox 保持 false：preload 编译为 ESM（package.json type: module），
-      // sandbox 下 preload 仅支持 CommonJS/有限 require，ESM import 会崩溃。
-      // 安全补偿：webSecurity（默认）+ 严格 CSP（index.html）+ 导航防护（B 部分）。
-      sandbox: false,
-      webSecurity: true,
+  windowGen = new MainWindowGeneration({
+    preloadPath: join(__dirname, 'preload.js'),
+    appPath: app.getAppPath(),
+    devServerUrl: VITE_DEV_SERVER_URL,
+    onHideToTray: () => {
+      // 首次隐藏到托盘：提示一次（不打扰）
+      if (!trayHintShown) {
+        trayHintShown = true
+        try {
+          new Notification({ title: 'DSH Desktop', body: '应用已最小化到托盘，点托盘鲸鱼图标恢复。' }).show()
+        } catch {
+          // 通知失败不阻塞
+        }
+      }
     },
   })
-
-  // 引擎 UI 页面 <title>（如 "DeepSeek Harness"）会触发 page-title-updated
-  // 覆盖窗口标题。这里拦截，强制保持 "DSH Desktop"，使任务栏/标题栏品牌一致。
-  mainWindow.on('page-title-updated', (e) => {
-    e.preventDefault()
-  })
-
-  mainWindow.on('closed', () => {
-    mainWindow = null
-    loadedEnginePort = null
-  })
-
-  // 关闭窗口（X）→ 隐藏到托盘，不退出（托盘菜单"退出"才真正退出）
-  mainWindow.on('close', (e) => {
-    if (quitting) return
-    e.preventDefault()
-    mainWindow?.hide()
-    // 首次隐藏到托盘：提示一次（不打扰）
-    if (!trayHintShown) {
-      trayHintShown = true
-      try {
-        new Notification({ title: 'DSH Desktop', body: '应用已最小化到托盘，点托盘鲸鱼图标恢复。' }).show()
-      } catch {
-        // 通知失败不阻塞
-      }
-    }
-  })
-
-  if (VITE_DEV_SERVER_URL) {
-    // dev：先加载本地渲染器作为启动/回退屏，引擎就绪后由 loadEngineUI 跳转
-    void mainWindow.loadURL(VITE_DEV_SERVER_URL)
-  } else {
-    // prod：先加载本地构建作为启动/回退屏，引擎就绪后由 loadEngineUI 跳转
-    void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'))
-  }
-
-  // ---- 导航防护（012） ----
-  // 新窗口（如 target=_blank / window.open）：仅 http/https 外部链接走系统浏览器
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) {
-      void shell.openExternal(url)
-    }
-    return { action: 'deny' }
-  })
-  // 应用窗口只能导航到自身资源（dev server / 打包文件 / 精确引擎端口），其余一律阻止
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const isEngine = loadedEnginePort !== null && url.startsWith(`http://127.0.0.1:${loadedEnginePort}`)
-    const isDev = VITE_DEV_SERVER_URL ? url.startsWith(VITE_DEV_SERVER_URL) : false
-    const isFile = url.startsWith('file://')
-    if (!isEngine && !isDev && !isFile) event.preventDefault()
-  })
-}
-
-/** 当前窗口指向的引擎端口（防重复 loadURL；也用于导航白名单精确匹配）。 */
-let loadedEnginePort: number | null = null
-
-/** 把主窗口加载到官方 UI（引擎端口）。端口变化时重新加载；失败定时重试。 */
-function loadEngineUI(port: number, token: string | null) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  if (loadedEnginePort === port) return
-  loadedEnginePort = port
-  const url = `http://127.0.0.1:${port}/?token=${encodeURIComponent(token ?? '')}`
-  let attempt = 0
-  const tryLoad = () => {
-    // 端口已变（引擎重启换新端口触发 loadEngineUI 新端口）→ 放弃旧端口重试
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    if (loadedEnginePort !== port) return
-    void mainWindow.loadURL(url).catch((err) => {
-      logger.warn(`[loadEngineUI] 加载官方 UI 失败: ${(err as Error)?.message ?? err}`)
-      if (loadedEnginePort === port) loadedEnginePort = null
-      // 递增重试：1s/2s/5s/... 最多 10 次，避免窗口永停回退屏
-      attempt += 1
-      if (attempt <= 10) {
-        const delay = attempt === 1 ? 1000 : attempt === 2 ? 2000 : Math.min(5000 * attempt, 30000)
-        setTimeout(tryLoad, delay)
-      }
-    })
-  }
-  tryLoad()
+  mainWindow = windowGen.window
 }
 
 /**
@@ -391,22 +317,17 @@ app.whenReady().then(async () => {
 
   // 后台启动 dsh，就绪后加载官方 UI（引擎端口），失败不阻塞（保留回退屏）
   void manager.start().then((s) => {
-    if (s.port) loadEngineUI(s.port, manager.token)
+    if (s.port) windowGen?.loadEngineUI(s.port, manager.token)
   }).catch((err) => {
     logger.error(`[dsh] 启动失败: ${err instanceof Error ? err.stack ?? err.message : err}`)
   })
 
   // 端口跟随：引擎崩溃重启换端口 → 窗口重新 loadURL 新端口（A0 端口漂移）
   manager.onStatus((s) => {
-    if (s.port && s.ready) loadEngineUI(s.port, manager.token)
+    if (s.port && s.ready) windowGen?.loadEngineUI(s.port, manager.token)
     // 崩溃恢复态：引擎已死，窗口回退到本地 React UI（展示恢复页）
     if (s.recovery && !s.ready) {
-      loadedEnginePort = null
-      if (VITE_DEV_SERVER_URL) {
-        void mainWindow?.loadURL(VITE_DEV_SERVER_URL)
-      } else {
-        void mainWindow?.loadFile(join(app.getAppPath(), 'dist', 'index.html'))
-      }
+      windowGen?.loadFallback()
     }
   })
 
